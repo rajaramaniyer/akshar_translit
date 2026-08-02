@@ -3,6 +3,7 @@ import 'scripts/devanagari.dart' as dev;
 import 'scripts/itrans.dart' as itr;
 import 'scripts/kannada.dart' as kan;
 import 'scripts/malayalam.dart' as mal;
+import 'scripts/roman_readable.dart' as rrd;
 import 'scripts/tamil.dart' as tam;
 import 'scripts/telugu.dart' as tel;
 
@@ -101,6 +102,7 @@ class ScriptMap {
     Script.telugu: tel.map,
     Script.malayalam: mal.map,
     Script.itrans: itr.map,
+    Script.romanReadable: rrd.map,
   };
 
   /// Returns the [ScriptMap] for [id].

@@ -80,7 +80,8 @@ class Transliterator {
     }
     s = _preprocessSource(s, from);
 
-    final bool romanTarget = to == Script.itrans;
+    final bool romanTarget =
+        to == Script.itrans || to == Script.romanReadable;
 
     // Om is handled by the shared pair list below — Aksharamukha's extra
     // context-sensitive Om regex is only useful when source or target Om
@@ -94,6 +95,9 @@ class Transliterator {
 
     if (romanTarget) {
       s = _fixRomanOutput(s, tgt);
+      if (to == Script.romanReadable) {
+        s = _fixRomanColloquial(s);
+      }
     } else {
       s = _fixIndicOutput(s, tgt, options);
     }
@@ -288,6 +292,7 @@ class Transliterator {
       case Script.devanagari:
       case Script.tamil:
       case Script.itrans:
+      case Script.romanReadable:
         // Not target defaults; explicit user overrides still apply.
         if (opts.nasalToAnusvara == true) s = _nasalToAnusvara(s, tgt);
         if (opts.anusvaraToNasal == true) s = _anusvaraToNasal(s, tgt);
@@ -408,6 +413,63 @@ class Transliterator {
       RegExp('${_re(m)}${_re(vir)}(?!$contentAlt)'),
       anu,
     );
+  }
+
+  /// Aksharamukha's `FixRomanColloquial`: anusvara-context expansion,
+  /// palatal-nasal smoothing, and trimming of the leftover apostrophes and
+  /// underscores that the base map / schwa handling leave behind.
+  String _fixRomanColloquial(String s) {
+    // Palatal nasal between vowels: `anja` → `anya`, at word edges too.
+    s = s.replaceAllMapped(
+      RegExp('([aiueo])nj([aeiou])'),
+      (Match m) => '${m[1]}ny${m[2]}',
+    );
+    s = s.replaceAllMapped(
+      RegExp(r'(\W)nj([aeiou])'),
+      (Match m) => '${m[1]}ny${m[2]}',
+    );
+    s = s.replaceAllMapped(
+      RegExp('^nj([aeiou])'),
+      (Match m) => 'ny${m[1]}',
+    );
+    s = s.replaceAll('njnj', 'nny');
+
+    // Anusvara (M) followed by a class initial: pick the natural English
+    // spelling. Order matters — `Mk` → `ngk` happens first, then `ngk` → `nk`.
+    const List<List<String>> mExpand = <List<String>>[
+      <String>['Mk', 'ngk'],
+      <String>['Mg', 'ngg'],
+      <String>['Mc', 'njc'],
+      <String>['Mj', 'njj'],
+      <String>['Md', 'nd'],
+      <String>['Mt', 'nt'],
+      <String>['Mb', 'mb'],
+      <String>['Mp', 'mp'],
+    ];
+    for (final List<String> pair in mExpand) {
+      s = s.replaceAll(pair[0], pair[1]);
+    }
+    // Leftover anusvara: Aksharamukha emits a combining grapheme joiner so
+    // the `m` doesn't visually fuse with the next character. Match that.
+    s = s.replaceAll('M', 'm\u034F');
+
+    // Second pass collapses the doubled-nasal clusters produced above and
+    // any pre-existing sequences from Aksharamukha's base map.
+    s = s.replaceAll('ngk', 'nk');
+    s = s.replaceAll('ngg', 'ng');
+    s = s.replaceAll('njc', 'nc');
+    s = s.replaceAll('njj', 'nj');
+    s = s.replaceAll('jnj', 'jny');
+
+    // Aksharamukha additionally aspirates dental t/d for Tamil sources, but
+    // its implementation over-applies (turns `th` → `thh` etc.). We omit
+    // that step; readers of Tamil-source output get plain t/d.
+
+    // Strip the disambiguating apostrophes and underscores that the base
+    // map and schwa handling leave behind.
+    s = s.replaceAll("'", '').replaceAll('_', '');
+
+    return s;
   }
 }
 

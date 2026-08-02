@@ -140,6 +140,58 @@ void main() {
     });
   });
 
+  group('Devanagari → RomanReadable', () {
+    test('krishna', () {
+      expect(
+        transliterate('कृष्ण', from: Script.devanagari, to: Script.romanReadable),
+        'krishna',
+      );
+    });
+
+    test('ganga (nasal cluster collapses)', () {
+      expect(
+        transliterate('गङ्गा', from: Script.devanagari, to: Script.romanReadable),
+        'ganga',
+      );
+    });
+
+    test('pancha (palatal nasal cluster)', () {
+      expect(
+        transliterate('पञ्च', from: Script.devanagari, to: Script.romanReadable),
+        'pancha',
+      );
+    });
+
+    test('rama (word-final schwa drop is not applied; readable output keeps -a)', () {
+      expect(
+        transliterate('राम', from: Script.devanagari, to: Script.romanReadable),
+        'rama',
+      );
+    });
+
+    test('samskritam (anusvara before sibilant)', () {
+      final String out = transliterate('संस्कृतम्',
+          from: Script.devanagari, to: Script.romanReadable);
+      // Aksharamukha emits a combining grapheme joiner (\u034F) after the
+      // leftover anusvara m; strip it for the visible-string check.
+      expect(out.replaceAll('\u034F', ''), 'samskritam');
+    });
+
+    test('shiva', () {
+      expect(
+        transliterate('शिव', from: Script.devanagari, to: Script.romanReadable),
+        'shiva',
+      );
+    });
+
+    test('Om', () {
+      expect(
+        transliterate('ॐ', from: Script.devanagari, to: Script.romanReadable),
+        'Om',
+      );
+    });
+  });
+
   group('preserved input', () {
     test('unknown characters (whitespace, punctuation) pass through', () {
       expect(transliterate('अ ब', from: Script.devanagari, to: Script.kannada), 'ಅ ಬ');

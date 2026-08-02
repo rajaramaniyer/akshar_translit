@@ -19,4 +19,9 @@ enum Script {
 
   /// ITRANS Roman (ASCII, case-sensitive).
   itrans,
+
+  /// Phonetic English (a.k.a. Aksharamukha's `RomanColloquial`). No
+  /// diacritics or escape characters — designed for casual readers, so
+  /// distinctions between retroflex/dental and short/long vowels collapse.
+  romanReadable,
 }
