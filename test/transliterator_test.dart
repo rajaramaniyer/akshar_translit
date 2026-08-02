@@ -190,6 +190,29 @@ void main() {
         'Om',
       );
     });
+
+    test('ZWSP word-break hint becomes real space', () {
+      // Sanskrit compound with an invisible ZWSP between the two members.
+      // In the Devanagari source it renders as zero width, so the compound
+      // looks continuous. Every transliteration target promotes it to a
+      // real space so a reader in any script gets the word seam.
+      const String zwsp = '\u200B';
+      expect(
+        transliterate('राम${zwsp}सीता',
+            from: Script.devanagari, to: Script.romanReadable),
+        'rama sita',
+      );
+      expect(
+        transliterate('राम${zwsp}सीता',
+            from: Script.devanagari, to: Script.kannada),
+        'ರಾಮ ಸೀತಾ',
+      );
+      expect(
+        transliterate('राम${zwsp}सीता',
+            from: Script.devanagari, to: Script.tamil),
+        'ராம ஸீதா',
+      );
+    });
   });
 
   group('preserved input', () {

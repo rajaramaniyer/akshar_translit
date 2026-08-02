@@ -14,6 +14,12 @@ const String _depV = '\u1E7F';
 const String _zwj = '\u200D';
 const String _zwnj = '\u200C';
 
+/// Zero-Width Space. Preserved through substitution and turned into a real
+/// space by [Transliterator] when the target is a Roman script. Content
+/// authors can sprinkle ZWSP into long Sanskrit compounds as an invisible
+/// word-break hint that only surfaces when read in Roman transliteration.
+const String _zwsp = '\u200B';
+
 /// Vedic tonal marks (udatta, anudatta, dvi-svarita). Optionally stripped.
 const List<String> _vedicSvaras = <String>['\u1CDA', '\u0951', '\u0952', '\u1CD0', '\u1CD1', '\u1CD2', '\u1CD3', '\u1CD4', '\u1CDB', '\u0951', '\u0952', '\u0953', '\u0954', '\u1CE5', '\u1CE6', '\u1CE7', '᳚', '॑', '॒'];
 
@@ -101,6 +107,9 @@ class Transliterator {
     } else {
       s = _fixIndicOutput(s, tgt, options);
     }
+
+    // Preserved ZWSP word-break hints become real spaces in every target.
+    s = s.replaceAll(_zwsp, ' ');
 
     return s;
   }
