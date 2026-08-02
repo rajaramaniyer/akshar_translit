@@ -1,0 +1,11 @@
+name: akshar_translit
+description: Offline transliteration of Sanskrit (Devanagari) and Tamil text to Kannada, Telugu, Malayalam and ITRANS. Rule tables ported from Aksharamukha.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^4.0.0
