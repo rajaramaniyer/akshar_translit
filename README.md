@@ -80,7 +80,11 @@ Aksharamukha's per-target default, or override explicitly.
 - `malayalamRemoveHistorical` — collapse historical Malayalam letters
 - `teluguRemoveShortEO` — drop Telugu short e/o length markers
 - `removeVedicSvaras` — strip Vedic accent marks (non-null; default `true`)
-
+- `useNativeNumerals` — default `false`. Native-script digits in the
+  output are flattened to ASCII `0`–`9` (matches modern Indic typesetting).
+  Set to `true` to preserve target-native digits (Devanagari `०–९`,
+  Tamil `௦–௯`, etc.), matching Aksharamukha upstream. Roman targets
+  are unaffected either way.
 ## Known limitations
 
 - **Tamil source with no Grantha markers** cannot recover Sanskrit

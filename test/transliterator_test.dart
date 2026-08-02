@@ -48,6 +48,31 @@ void main() {
       expect(transliterate('राम', from: Script.devanagari, to: Script.telugu), 'రామ');
     });
 
+    test('native numerals map to ASCII by default', () {
+      expect(
+        transliterate('०१२३४५६७८९',
+            from: Script.devanagari, to: Script.telugu),
+        '0123456789',
+      );
+    });
+
+    test('useNativeNumerals: true preserves Telugu digits', () {
+      const TransliterationOptions opts =
+          TransliterationOptions(useNativeNumerals: true);
+      expect(
+        transliterate('०१२३४५६७८९',
+            from: Script.devanagari, to: Script.telugu, options: opts),
+        '\u0C66\u0C67\u0C68\u0C69\u0C6A\u0C6B\u0C6C\u0C6D\u0C6E\u0C6F',
+      );
+    });
+
+    test('ASCII digits pass through unchanged', () {
+      expect(
+        transliterate('राम 15', from: Script.devanagari, to: Script.telugu),
+        'రామ 15',
+      );
+    });
+
     test('nasal cluster', () {
       expect(transliterate('गङ्गा', from: Script.devanagari, to: Script.telugu), 'గంగా');
     });
@@ -109,6 +134,28 @@ void main() {
     test('consonant + halant + h gets _ separator', () {
       // Preserves the distinction between क्ह (k-halant-h) and ख (kh).
       expect(transliterate('क्ह', from: Script.devanagari, to: Script.itrans), 'k_ha');
+    });
+  });
+
+  group('Devanagari → Tamil numerals', () {
+    test('०१२३४५६७८९ becomes ASCII 0-9 by default', () {
+      expect(
+        transliterate('०१२३४५६७८९',
+            from: Script.devanagari, to: Script.tamil),
+        '0123456789',
+      );
+    });
+
+    test('useNativeNumerals: true gives Tamil digits ௦-௯', () {
+      const TransliterationOptions opts =
+          TransliterationOptions(useNativeNumerals: true);
+      expect(
+        transliterate('०१२३४५६७८९',
+            from: Script.devanagari,
+            to: Script.tamil,
+            options: opts),
+        '\u0BE6\u0BE7\u0BE8\u0BE9\u0BEA\u0BEB\u0BEC\u0BED\u0BEE\u0BEF',
+      );
     });
   });
 

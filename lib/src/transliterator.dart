@@ -106,6 +106,9 @@ class Transliterator {
       }
     } else {
       s = _fixIndicOutput(s, tgt, options);
+      if (!options.useNativeNumerals) {
+        s = _flattenNumeralsToAscii(s, tgt);
+      }
     }
 
     // Preserved ZWSP word-break hints become real spaces in every target.
@@ -478,6 +481,17 @@ class Transliterator {
     // map and schwa handling leave behind.
     s = s.replaceAll("'", '').replaceAll('_', '');
 
+    return s;
+  }
+
+  /// Replaces each of the target script's native digits with the matching
+  /// ASCII digit. Called when the caller opts out of native numerals.
+  String _flattenNumeralsToAscii(String s, ScriptMap tgt) {
+    for (int i = 0; i < 10 && i < tgt.numerals.length; i++) {
+      final String native = tgt.numerals[i];
+      if (native.isEmpty || native == '$i') continue;
+      s = s.replaceAll(native, '$i');
+    }
     return s;
   }
 }

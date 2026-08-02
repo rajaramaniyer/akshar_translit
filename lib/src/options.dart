@@ -11,6 +11,7 @@ class TransliterationOptions {
     this.malayalamRemoveHistorical,
     this.teluguRemoveShortEO,
     this.removeVedicSvaras = false,
+    this.useNativeNumerals = false,
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -43,4 +44,11 @@ class TransliterationOptions {
   /// Strip Vedic tonal marks (udatta, anudatta, dvi-svarita) from the input
   /// before conversion.
   final bool removeVedicSvaras;
+
+  /// When `false` (the default) native-script digits in the output are
+  /// flattened to ASCII `0`–`9` — matching the way most modern Indian
+  /// content is typeset. Set to `true` to preserve target-native digits
+  /// (Devanagari `०–९`, Tamil `௦–௯`, etc.), matching Aksharamukha's
+  /// upstream behaviour. Roman targets are unaffected either way.
+  final bool useNativeNumerals;
 }
