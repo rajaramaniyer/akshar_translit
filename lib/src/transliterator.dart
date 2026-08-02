@@ -311,6 +311,11 @@ class Transliterator {
         if (opts.mToAnusvara == true) s = _mToAnusvara(s, tgt);
         break;
     }
+
+    // Tamil target: strip the Sanskrit-marker apostrophes by default.
+    if (tgt.id == Script.tamil && (opts.tamilRemoveApostrophe ?? true)) {
+      s = s.replaceAll('\u02BC', '').replaceAll('\u02EE', '');
+    }
     return s;
   }
 

@@ -79,6 +79,9 @@ Aksharamukha's per-target default, or override explicitly.
 - `malayalamAnusvaraNasal` — Malayalam's asymmetric traditional expansion
 - `malayalamRemoveHistorical` — collapse historical Malayalam letters
 - `teluguRemoveShortEO` — drop Telugu short e/o length markers
+- `tamilRemoveApostrophe` — strip the modifier-letter apostrophes (`ʼ`,
+  `ˮ`) that Aksharamukha inserts in Tamil output to disambiguate Sanskrit
+  sounds. Default `true` for Tamil.
 - `removeVedicSvaras` — strip Vedic accent marks (non-null; default `true`)
 - `useNativeNumerals` — default `false`. Native-script digits in the
   output are flattened to ASCII `0`–`9` (matches modern Indic typesetting).

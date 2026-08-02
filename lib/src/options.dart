@@ -10,6 +10,7 @@ class TransliterationOptions {
     this.malayalamAnusvaraNasal,
     this.malayalamRemoveHistorical,
     this.teluguRemoveShortEO,
+    this.tamilRemoveApostrophe,
     this.removeVedicSvaras = false,
     this.useNativeNumerals = false,
   });
@@ -40,6 +41,13 @@ class TransliterationOptions {
   /// Telugu output — Telugu shows short and long e/o with the same base
   /// glyph. Default `true` for Telugu.
   final bool? teluguRemoveShortEO;
+
+  /// Strip the modifier-letter apostrophes (`ʼ`, `ˮ`) that Aksharamukha
+  /// sprinkles into Tamil output to mark Sanskrit-specific sounds
+  /// (`ருʼ` for ṛ, `ம்ʼ` for anusvara, etc.). Default `true` for
+  /// Tamil — the marks are usually noise for readers who don't need the
+  /// Sanskrit distinction.
+  final bool? tamilRemoveApostrophe;
 
   /// Strip Vedic tonal marks (udatta, anudatta, dvi-svarita) from the input
   /// before conversion.

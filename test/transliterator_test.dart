@@ -93,6 +93,24 @@ void main() {
     });
   });
 
+  group('Devanagari → Tamil apostrophes', () {
+    test('Sanskrit-marker apostrophes are stripped by default', () {
+      // कृ would normally emit ருʼ; with the default option that ʼ is gone.
+      final String out =
+          transliterate('कृष्ण', from: Script.devanagari, to: Script.tamil);
+      expect(out.contains('\u02BC'), isFalse);
+      expect(out.contains('\u02EE'), isFalse);
+    });
+
+    test('tamilRemoveApostrophe: false keeps them for scholarly use', () {
+      const TransliterationOptions opts =
+          TransliterationOptions(tamilRemoveApostrophe: false);
+      final String out = transliterate('कृष्ण',
+          from: Script.devanagari, to: Script.tamil, options: opts);
+      expect(out.contains('\u02BC'), isTrue);
+    });
+  });
+
   group('Devanagari → ITRANS', () {
     test('bare consonant', () {
       expect(transliterate('क', from: Script.devanagari, to: Script.itrans), 'ka');
