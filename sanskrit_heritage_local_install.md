@@ -140,3 +140,148 @@ executables with no runtime dependency on OCaml/opam being on `PATH`. As long as
 
 ...it should work from a fresh terminal with no `eval $(opam env)` needed. Worth a
 one-time sanity check by opening a new terminal tab and re-running the test above.
+
+---
+
+## Appendix: Fresh Machine — Full Command Sequence
+
+Everything below, start to end, assuming a clean macOS machine with nothing
+pre-installed. This is the distilled *working* path — it skips the
+trial-and-error detours from the main writeup above (e.g. it goes straight to
+the `heritage` opam switch rather than the general `ocaml`/`ocamlfind` install
+that turned out to be the wrong toolchain for `camlp4`). Replace
+`rajaramaniyer` with your own username wherever it appears.
+
+### 1. System prerequisites
+```bash
+xcode-select --install
+
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+brew install opam pyenv
+```
+
+### 2. OCaml toolchain (dedicated switch, pinned old enough for camlp4)
+```bash
+opam init
+opam switch create heritage 4.14.2
+eval $(opam env --switch=heritage)
+opam install ocamlfind ocamlbuild camlp4 camlp-streams
+```
+(`dune` gets pulled in automatically as a dependency of `camlp-streams` — no
+need to install it separately.)
+
+### 3. Python 2 (only needed to run the `configure` script)
+```bash
+pyenv install 2.7.18
+```
+
+### 4. Clone the three required repos
+```bash
+mkdir -p ~/sanskrit_heritage
+cd ~/sanskrit_heritage
+git clone https://gitlab.inria.fr/huet/Zen.git
+git clone https://gitlab.inria.fr/huet/Heritage_Resources.git
+git clone https://gitlab.inria.fr/huet/Heritage_Platform.git
+```
+
+### 5. Config file
+```bash
+cd ~/sanskrit_heritage/Heritage_Platform
+
+cat > SETUP/CONFIGS/raj_config.txt << 'EOF'
+ZENDIR='/Users/rajaramaniyer/sanskrit_heritage/Zen/ML/'
+PLATFORM='Computer'
+TRANSLIT='VH'
+LEXICON='SH'
+DISPLAY='roma'
+SERVERHOST='127.0.0.1'
+SERVERPUBLICDIR='/Users/rajaramaniyer/sanskrit_heritage/webdir/'
+SKTDIRURL='/SKT/'
+SKTRESOURCES='/Users/rajaramaniyer/sanskrit_heritage/Heritage_Resources/'
+CGIBINURL='/cgi-bin/SKT/'
+CGIDIR='/Users/rajaramaniyer/sanskrit_heritage/cgidir/'
+CGIEXT=''
+MOUSEACTION='CLICK'
+CAPTION='Local mirror Raj'
+EOF
+
+ln -sf CONFIGS/raj_config.txt SETUP/config
+
+mkdir -p ~/sanskrit_heritage/webdir
+mkdir -p ~/sanskrit_heritage/cgidir
+```
+
+### 6. Configure
+```bash
+eval $(opam env --switch=heritage)   # make sure the right toolchain is active
+$(pyenv root)/versions/2.7.18/bin/python2 configure
+```
+
+### 7. Pre-build setup steps
+(These replicate parts of the top-level `all:` target that have to run
+*before* compiling `ML/`, done manually because of the ordering bug described
+above — `cold` needs `ML/reset_caches`, which doesn't exist yet at that point
+in the documented `make all` sequence.)
+```bash
+ln -sf ~/sanskrit_heritage/Zen/ML/ ZEN
+cp -Rp ~/sanskrit_heritage/Heritage_Resources/DICO .
+cp -Rp ~/sanskrit_heritage/Heritage_Resources/MW .
+test -e ML/SCLpaths.ml || cp SETUP/dummy_SCLpaths.ml ML/SCLpaths.ml
+
+cd ML
+make test_version
+./test_stamp
+cd ..
+```
+
+### 8. Build the transducers (data-heavy, takes a while)
+```bash
+mkdir -p DATA
+cd ML && make make_transducers && cd ..
+make transducers
+```
+
+### 9. Compile the engine
+```bash
+cd ML && make engine && cd ..
+```
+
+### 10. Cache scaffolding
+```bash
+make cold
+```
+
+### 11. Copy linguistic data into the public dir
+(This is the step that's easy to miss — it's normally inside `make install`,
+which we skip; see "Why we skipped `make install`" above.)
+```bash
+make releasedata
+```
+
+### 12. Python side
+```bash
+pip3 install heritage
+# if you hit "externally-managed-environment": pip3 install heritage --break-system-packages
+```
+
+### 13. Verify
+```bash
+python3 -c "
+from pathlib import Path
+from heritage import HeritagePlatform
+
+platform = HeritagePlatform(
+    base_dir=Path('/Users/rajaramaniyer/sanskrit_heritage/Heritage_Platform'),
+    method='shell',
+)
+result = platform.get_analysis('राधाकृष्णपदाम्बुजभृङ्गम्', sentence=True, unsandhied=True)
+print(result)
+"
+```
+Success looks like a dict of numbered `SolutionAnalysis` objects, not an
+OCaml `Fatal error`. From here, `sanskrit_zws_segmenter.py` and
+`sanskrit_chapter_zws.py` (both `--method shell` by default) should work
+against this install with no further setup, including from a brand new
+terminal tab (see "Does this survive a new terminal session?" above).
+
