@@ -80,7 +80,10 @@ class Transliterator {
     // Optional compound-split preprocessor. Only meaningful for Devanagari
     // sources (the bundled stem set is Devanagari); silently no-op otherwise.
     if (options.splitCompounds && from == Script.devanagari) {
-      s = DevanagariSegmenter.bundled().insertBreaks(s);
+      s = DevanagariSegmenter.bundled().insertBreaks(
+        s,
+        allowVowelSandhi: options.splitAcrossVowelSandhi,
+      );
     }
 
     // Pre-process: strip joiners, optionally strip vedic marks, apply

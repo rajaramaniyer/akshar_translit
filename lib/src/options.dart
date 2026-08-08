@@ -14,6 +14,7 @@ class TransliterationOptions {
     this.removeVedicSvaras = false,
     this.useNativeNumerals = false,
     this.splitCompounds = false,
+    this.splitAcrossVowelSandhi = false,
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -69,4 +70,13 @@ class TransliterationOptions {
   /// set. Tokens that don't fully segment pass through unchanged. Ignored
   /// when the source isn't Devanagari.
   final bool splitCompounds;
+
+  /// When `true` *and* [splitCompounds] is `true`, extend the splitter to
+  /// also allow the six deterministic vowel-coalescence rules at seams
+  /// (`a/ā + a/ā/i/ī/u/ū/e/o` → single fused matra). Split pieces are
+  /// emitted in their *underlying* dictionary form, so the fused matra at
+  /// each split point is rewritten to two vowels — the output is no longer
+  /// a byte-for-byte transliteration of the input. Ignored when
+  /// [splitCompounds] is `false` or the source isn't Devanagari.
+  final bool splitAcrossVowelSandhi;
 }

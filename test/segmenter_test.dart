@@ -81,4 +81,87 @@ void main() {
       expect(out.contains(' '), isFalse);
     });
   });
+
+  group('DevanagariSegmenter.insertBreaks (allowVowelSandhi)', () {
+    test('literal mode: vowel-fused compound stays unsplit', () {
+      // yamaniyamAsanaprANAyAma...samAdhi — inner seams have fused matras,
+      // so nothing here can be recovered without sandhi undo.
+      const String yog =
+          'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि';
+      expect(seg.insertBreaks(yog), yog);
+    });
+
+    test('sandhi mode: splits at a + a = ā seam (yoga-sūtra compound)', () {
+      const String yog =
+          'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि';
+      final String out = seg.insertBreaks(yog, allowVowelSandhi: true);
+      // Long-vowel head preferred, so we expect āsana not asana.
+      expect(out, contains('आसन'));
+      expect(out.split(_zwsp).length, greaterThanOrEqualTo(3));
+      // Last piece must be the bare-stem tail samAdhi.
+      expect(out.split(_zwsp).last, 'समाधि');
+    });
+
+    test('sandhi mode: pass-through when the whole word is a known stem', () {
+      // maheśvara is itself in the lexicon — sandhi mode should not force a
+      // split of a known headword.
+      expect(seg.insertBreaks('महेश्वर', allowVowelSandhi: true), 'महेश्वर');
+      expect(seg.insertBreaks('महोत्सव', allowVowelSandhi: true), 'महोत्सव');
+    });
+
+    test('sandhi mode: still splits literal (non-fused) seams', () {
+      // Consonant-boundary compounds continue to split as they did in
+      // literal mode.
+      expect(seg.insertBreaks('अंशकरण', allowVowelSandhi: true),
+          'अंश${_zwsp}करण');
+      expect(seg.insertBreaks('धर्मक्षेत्रपति', allowVowelSandhi: true),
+          'धर्म${_zwsp}क्षेत्र${_zwsp}पति');
+    });
+  });
+
+  group('Transliterator.splitAcrossVowelSandhi option', () {
+    const TransliterationOptions sandhiOn = TransliterationOptions(
+      splitCompounds: true,
+      splitAcrossVowelSandhi: true,
+    );
+    const TransliterationOptions litOnly =
+        TransliterationOptions(splitCompounds: true);
+
+    test('sandhi off: yoga-sūtra compound survives as one run', () {
+      final String out = transliterate(
+        'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि',
+        from: Script.devanagari,
+        to: Script.itrans,
+        options: litOnly,
+      );
+      expect(out.contains(' '), isFalse);
+    });
+
+    test('sandhi on: same compound reads with word breaks in ITRANS', () {
+      final String out = transliterate(
+        'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि',
+        from: Script.devanagari,
+        to: Script.itrans,
+        options: sandhiOn,
+      );
+      // Must contain word-break spaces.
+      expect(out.contains(' '), isTrue);
+      // Head-final: last space-separated word is `samAdhi`.
+      expect(out.split(' ').last, 'samAdhi');
+      // Long-vowel head preferred → we expect the substring `Asana` from आसन.
+      expect(out, contains('Asana'));
+    });
+
+    test('sandhi on has no effect when splitCompounds is off', () {
+      const TransliterationOptions onlySandhi =
+          TransliterationOptions(splitAcrossVowelSandhi: true);
+      final String out = transliterate(
+        'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि',
+        from: Script.devanagari,
+        to: Script.itrans,
+        options: onlySandhi,
+      );
+      expect(out.contains(' '), isFalse);
+    });
+  });
 }
