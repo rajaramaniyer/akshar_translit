@@ -1,6 +1,7 @@
 import 'options.dart';
 import 'script.dart';
 import 'script_map.dart';
+import 'segmenter/segmenter.dart';
 
 /// Aksharamukha's internal marker for the implicit `a` after a consonant.
 const String _schwa = '\uF000';
@@ -75,6 +76,12 @@ class Transliterator {
     final ScriptMap tgt = ScriptMap.of(to);
 
     String s = input;
+
+    // Optional compound-split preprocessor. Only meaningful for Devanagari
+    // sources (the bundled stem set is Devanagari); silently no-op otherwise.
+    if (options.splitCompounds && from == Script.devanagari) {
+      s = DevanagariSegmenter.bundled().insertBreaks(s);
+    }
 
     // Pre-process: strip joiners, optionally strip vedic marks, apply
     // source-specific normalisations.

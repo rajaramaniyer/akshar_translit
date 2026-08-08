@@ -13,6 +13,7 @@ class TransliterationOptions {
     this.tamilRemoveApostrophe,
     this.removeVedicSvaras = false,
     this.useNativeNumerals = false,
+    this.splitCompounds = false,
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -59,4 +60,13 @@ class TransliterationOptions {
   /// (Devanagari `०–९`, Tamil `௦–௯`, etc.), matching Aksharamukha's
   /// upstream behaviour. Roman targets are unaffected either way.
   final bool useNativeNumerals;
+
+  /// When `true` and the source is Devanagari, run a dictionary-driven
+  /// compound splitter over each token before transliteration and insert
+  /// U+200B between recognised stems. The splitter is literal (no sandhi
+  /// undo): a compound is split only when its surface form equals the
+  /// concatenation of two or more stems from the bundled csl-inflect stem
+  /// set. Tokens that don't fully segment pass through unchanged. Ignored
+  /// when the source isn't Devanagari.
+  final bool splitCompounds;
 }
