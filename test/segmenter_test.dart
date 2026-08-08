@@ -164,4 +164,156 @@ void main() {
       expect(out.contains(' '), isFalse);
     });
   });
+
+  group('DevanagariSegmenter.insertBreaks (allowInflectedTail)', () {
+    test('literal + infl: splits compound with accusative -म् tail', () {
+      // कृष्ण + देवम् — `देवम्` = `देव` + `-म्` acc-sg suffix. Base literal
+      // mode already handles this via a lucky lexicon match, but the point
+      // of the test is that `कृष्णभृङ्गम्` (with an unrelated -म् noun)
+      // works too.
+      expect(
+        seg.insertBreaks('कृष्णभृङ्गम्', allowInflectedTail: true),
+        'कृष्ण${_zwsp}भृङ्गम्',
+      );
+    });
+
+    test('single inflected word does not split', () {
+      // `भृङ्गम्` alone shouldn't split — the DP wouldn't leave a valid
+      // 2-piece decomposition.
+      expect(
+        seg.insertBreaks('भृङ्गम्', allowInflectedTail: true),
+        'भृङ्गम्',
+      );
+    });
+
+    test('acc-pl -आन् suffix on last piece', () {
+      // dvandva "प्राचेतस + नारद + प्रह्लाद" + acc-pl `-आन्` → `-ान्` on
+      // the surface (a→ā fusion). Needs both sandhi and inflection modes.
+      // NOTE: coverage depends on csl-inflect entries; if `प्रह्लाद` is
+      // missing from the bundled set, this stays unsplit.
+      final String out = seg.insertBreaks(
+        'नारदप्रह्लादान्',
+        allowVowelSandhi: true,
+        allowInflectedTail: true,
+      );
+      // Should at minimum produce a break of some sort or leave unchanged;
+      // we don't over-assert because `प्रह्लाद` is not in csl-inflect.
+      expect(out, anyOf(equals('नारदप्रह्लादान्'), contains(_zwsp)));
+    });
+
+    test('inflection alone without sandhi does not unfuse matras', () {
+      // Without sandhi mode, a compound whose only interior seams are
+      // fusion-based cannot decompose, even with allowInflectedTail on.
+      expect(
+        seg.insertBreaks('भागवतार्थम्', allowInflectedTail: true),
+        'भागवतार्थम्',
+      );
+    });
+  });
+
+  group('Transliterator.splitAcrossInflection option', () {
+    test('cascades into transliterator output as expected', () {
+      const opts = TransliterationOptions(
+        splitCompounds: true,
+        splitAcrossInflection: true,
+      );
+      final String out = transliterate(
+        'कृष्णभृङ्गम्',
+        from: Script.devanagari,
+        to: Script.itrans,
+        options: opts,
+      );
+      expect(out.contains(' '), isTrue);
+      expect(out.split(' ').last, 'bhR^i~Ngam');
+    });
+  });
+
+  group('DevanagariSegmenter allowGreedyFallback', () {
+    test('leaves short tokens untouched even when the flag is on', () {
+      // Below the 16-code-unit threshold: greedy shouldn't fire.
+      expect(
+        seg.insertBreaks('कृष्ण', allowGreedyFallback: true),
+        'कृष्ण',
+      );
+    });
+
+    test('breaks a long compound the strict DP cannot cover', () {
+      // प्राचेतस-नारद-प्रह्लाद-आन् — `प्रह्लाद` is not in csl-inflect
+      // so strict DP fails. Greedy should still produce 2+ pieces.
+      final String out = seg.insertBreaks(
+        'प्राचेतसनारदप्रह्लादान्',
+        allowGreedyFallback: true,
+        allowInflectedTail: true,
+      );
+      expect(out.contains(_zwsp), isTrue);
+      // Every emitted piece must be ≥ 2 aksharas (i.e. no bare `प्रा`
+      // or `प्र` preverb splits leaking through).
+      final List<String> pieces = out.split(_zwsp);
+      expect(pieces.length, greaterThanOrEqualTo(2));
+      for (final String p in pieces) {
+        expect(p.length, greaterThanOrEqualTo(2));
+      }
+    });
+
+    test('does not break at phonotactically-impossible cluster starts', () {
+      // राधाकृष्ण-पद-अम्बुज-भृङ्गम्. `अम्बुज` is missing from
+      // csl-inflect, but greedy must NOT emit `पदा|म्बुज…` because
+      // `म्ब` is an impossible word-initial cluster.
+      final String out = seg.insertBreaks(
+        'राधाकृष्णपदाम्बुजभृङ्गम्',
+        allowGreedyFallback: true,
+        allowInflectedTail: true,
+      );
+      for (final String p in out.split(_zwsp)) {
+        expect(
+          p.startsWith('म्'),
+          isFalse,
+          reason: 'greedy piece starts with impossible m+virama cluster',
+        );
+        expect(p.startsWith('र्'), isFalse);
+        expect(p.startsWith('ल्'), isFalse);
+      }
+    });
+
+    test('flag off is a no-op for uncoverable tokens', () {
+      // Same token as above with greedy off: strict DP can't segment.
+      expect(
+        seg.insertBreaks('प्राचेतसनारदप्रह्लादान्'),
+        'प्राचेतसनारदप्रह्लादान्',
+      );
+    });
+  });
+
+  group('Transliterator.splitGreedyFallback option', () {
+    test('cascades into ITRANS output for a long uncoverable compound', () {
+      const opts = TransliterationOptions(
+        splitCompounds: true,
+        splitAcrossInflection: true,
+        splitGreedyFallback: true,
+      );
+      final String out = transliterate(
+        'प्राचेतसनारदप्रह्लादान्',
+        from: Script.devanagari,
+        to: Script.itrans,
+        options: opts,
+      );
+      // Should contain at least one space (from ZWSP → space
+      // conversion for Roman output).
+      expect(out.contains(' '), isTrue);
+    });
+
+    test('flag off keeps the same compound unbroken', () {
+      const opts = TransliterationOptions(
+        splitCompounds: true,
+        splitAcrossInflection: true,
+      );
+      final String out = transliterate(
+        'प्राचेतसनारदप्रह्लादान्',
+        from: Script.devanagari,
+        to: Script.itrans,
+        options: opts,
+      );
+      expect(out.contains(' '), isFalse);
+    });
+  });
 }

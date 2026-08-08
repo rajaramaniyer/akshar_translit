@@ -30,6 +30,30 @@ const String _matraLongA = '\u093E';
 
 bool _isFusibleMatra(int c) => _fusibleHeadPrepends.containsKey(c);
 
+/// Common nominal case-endings, longest first. When
+/// [DevanagariSegmenter.insertBreaks] runs with `allowInflectedTail: true`,
+/// the *last* piece of a compound may match `stem + suffix` where `stem`
+/// is in the dictionary and `suffix` is one of these.
+///
+/// This covers the accusative / nominative / genitive endings that show up
+/// in devotional and epic Sanskrit — enough to segment lines like
+/// `राधाकृष्णपदाम्बुजभृङ्गम्` where every noun compound ends in `-म्`,
+/// `-आम्`, or `-आन्`. It is intentionally *not* a full paradigm table —
+/// larger lists get combinatorially more likely to fire on non-inflected
+/// tails and cause false splits.
+const List<String> _terminalInflectSuffixes = <String>[
+  'ाभ्याम्', // dual inst / dat / abl
+  'ेभ्यः',   // pl dat / abl
+  'ानाम्',   // gen pl (via a→ā sandhi)
+  'ेषु',      // pl loc
+  'ान्',      // acc pl m
+  'ाम्',      // acc sg f  (also gen pl a-stem)
+  'ैः',       // pl inst
+  'ाः',      // nom / acc pl f
+  'ौ',        // dual nom / acc / voc
+  'म्',       // acc sg m/n  ← the biggest single winner
+];
+
 /// Sanskrit compound splitter — dictionary-driven.
 ///
 /// The default stem set comes from
@@ -73,7 +97,32 @@ class DevanagariSegmenter {
   /// a split point is rewritten to the two-vowel form. So the surface
   /// `यमनियमासन` (yamaniyamāsana) becomes `यम‌नियम‌आसन`, which
   /// transliterates to `yama niyama Asana` in ITRANS.
-  String insertBreaks(String input, {bool allowVowelSandhi = false}) {
+  ///
+  /// When [allowInflectedTail] is `true`, the *last* piece of a compound
+  /// may be a `stem + case-ending` pair rather than a bare stem — e.g. the
+  /// devotional line `राधाकृष्णपदाम्बुजभृङ्गम्` can end in `भृङ्गम्`
+  /// (`भृङ्ग` + acc-sg `म्`) which is not itself in the dictionary. Only a
+  /// small closed list of common nominal endings is recognised; the last
+  /// piece is emitted with its ending intact (surface preserved).
+  ///
+  /// When [allowGreedyFallback] is `true`, tokens of at least
+  /// [greedyFallbackMinChars] code units that the DP couldn't fully cover
+  /// are re-scanned left-to-right: at each position we insert a ZWSP after
+  /// the *longest* prefix that is a recognised stem, then continue from
+  /// there. Unrecognised runs between two known stems are absorbed into
+  /// the trailing piece — so the output always covers the surface exactly,
+  /// but individual pieces may not all be dictionary words. Useful for
+  /// devotional / epic Sanskrit where compound coverage is sparse: a line
+  /// like `प्राचेतसनारदप्रह्लादान्` will at least become
+  /// `प्राचेतस\u200Bनारद\u200Bप्रह्लादान्` even though `प्रह्लाद`
+  /// isn't in the bundled csl-inflect set.
+  String insertBreaks(
+    String input, {
+    bool allowVowelSandhi = false,
+    bool allowInflectedTail = false,
+    bool allowGreedyFallback = false,
+    int greedyFallbackMinChars = 16,
+  }) {
     if (input.isEmpty) return input;
     final StringBuffer out = StringBuffer();
     int i = 0;
@@ -85,7 +134,11 @@ class DevanagariSegmenter {
         while (j < n && _isDevanagariLetter(input.codeUnitAt(j))) {
           j++;
         }
-        out.write(_splitToken(input.substring(i, j), allowVowelSandhi));
+        out.write(
+          _splitToken(input.substring(i, j), allowVowelSandhi,
+              allowInflectedTail, allowGreedyFallback,
+              greedyFallbackMinChars),
+        );
         i = j;
       } else {
         out.writeCharCode(c);
@@ -97,10 +150,20 @@ class DevanagariSegmenter {
 
   /// Returns the segmented form of a single Devanagari token, or the token
   /// itself if no valid full segmentation exists.
-  String _splitToken(String token, bool allowSandhi) {
+  String _splitToken(
+    String token,
+    bool allowSandhi,
+    bool allowInflectedTail,
+    bool allowGreedyFallback,
+    int greedyMinChars,
+  ) {
     if (_stems.contains(token)) return token;
     final List<int> boundaries = _aksharaBoundaries(token);
-    if (boundaries.length - 1 < 2 * _minAksharas) return token;
+    if (boundaries.length - 1 < 2 * _minAksharas) {
+      return allowGreedyFallback && token.length >= greedyMinChars
+          ? _greedySplit(token, boundaries, allowInflectedTail)
+          : token;
+    }
 
     // best[b][ts] = best segmentation of token[0..boundaries[b]] whose
     // last piece has right-tail state `ts`:
@@ -163,7 +226,11 @@ class DevanagariSegmenter {
 
             for (final String head in headPrepends) {
               final String pieceForm = head + surfaceTail;
-              if (!_stems.contains(pieceForm)) continue;
+              if (!_isValidPiece(
+                pieceForm,
+                isTerminal: end == lastIdx,
+                allowInflectedTail: allowInflectedTail,
+              )) continue;
 
               final _Best cand = _Best(
                 <String>[...prev.forms, pieceForm],
@@ -180,8 +247,106 @@ class DevanagariSegmenter {
     }
 
     final _Best? result = best[lastIdx][0]; // terminal must be literal tail
-    if (result == null || result.forms.length < 2) return token;
-    return result.forms.join(_zwsp);
+    if (result != null && result.forms.length >= 2) {
+      return result.forms.join(_zwsp);
+    }
+    return allowGreedyFallback && token.length >= greedyMinChars
+        ? _greedySplit(token, boundaries, allowInflectedTail)
+        : token;
+  }
+
+  /// Left-to-right longest-prefix scan used when the exact-cover DP can't
+  /// segment the token. At each position we find the longest recognised
+  /// stem starting there, emit a ZWSP after it, and continue. Aksharas
+  /// with no known stem starting from them are absorbed into the piece
+  /// preceding the next successful match (or into the trailing tail).
+  ///
+  /// The output always covers the token's surface — no rewriting — so
+  /// individual pieces may not all be dictionary words, but the reader
+  /// gets useful visual breaks in long compounds.
+  String _greedySplit(
+      String token, List<int> boundaries, bool allowInflectedTail) {
+    final int nB = boundaries.length;
+    final int n = nB - 1;
+    if (n < 2) return token;
+
+    final List<int> breaks = <int>[];
+    int pos = 0;
+    while (pos < n) {
+      int found = -1;
+      // Longest-first: try piece endings from n down to pos + 1. We
+      // require pieces of at least 2 aksharas — a single-akshara stem
+      // is almost always a preverb (प्र, आ, वि, सु…) rather than a
+      // meaningful compound member, and breaking there creates noise.
+      for (int end = n; end - pos >= 2; end--) {
+        final String piece =
+            token.substring(boundaries[pos], boundaries[end]);
+        final bool stemOk = _stems.contains(piece) ||
+            (end == n &&
+                allowInflectedTail &&
+                _isValidPiece(piece,
+                    isTerminal: true, allowInflectedTail: true));
+        if (!stemOk) continue;
+        // Look-ahead: don't break here if the next akshara starts with a
+        // phonotactically-impossible cluster — that means our surface
+        // "match" is really the front of a larger fused compound (e.g.
+        // matching `पदा` when the tail begins `म्बुज…`, or `चरणा` when
+        // the tail begins `ङ्कि…`).
+        //
+        // On rejection we abandon this position entirely rather than
+        // falling through to shorter candidates: those are almost always
+        // over-eager preverb / verbal-root matches (`चर` for
+        // `चरणाङ्कित`, `प्र` for `प्रह्लाद`) that produce more confusing
+        // splits than absorbing the whole region.
+        if (end < n &&
+            _hasImpossibleWordInitial(
+                token, boundaries[end], boundaries[end + 1])) {
+          break;
+        }
+        found = end;
+        break;
+      }
+      if (found == -1) {
+        // Either no stem starts here at all, or the only candidates
+        // failed look-ahead. Either way, advance one akshara — the
+        // unrecognised akshara will be absorbed into the next piece.
+        pos++;
+        continue;
+      }
+      if (found < n) breaks.add(found);
+      pos = found;
+    }
+
+    if (breaks.isEmpty) return token;
+
+    final StringBuffer out = StringBuffer();
+    int prev = 0;
+    for (final int b in breaks) {
+      out.write(token.substring(boundaries[prev], boundaries[b]));
+      out.write(_zwsp);
+      prev = b;
+    }
+    out.write(token.substring(boundaries[prev]));
+    return out.toString();
+  }
+
+  /// A piece is valid if it's a stem itself, or — for the terminal piece
+  /// when [allowInflectedTail] is on — a stem plus one of a small set of
+  /// nominal case endings.
+  bool _isValidPiece(
+    String pieceForm, {
+    required bool isTerminal,
+    required bool allowInflectedTail,
+  }) {
+    if (_stems.contains(pieceForm)) return true;
+    if (!isTerminal || !allowInflectedTail) return false;
+    for (final String suf in _terminalInflectSuffixes) {
+      if (!pieceForm.endsWith(suf)) continue;
+      final int stemLen = pieceForm.length - suf.length;
+      if (stemLen < 3) continue;
+      if (_stems.contains(pieceForm.substring(0, stemLen))) return true;
+    }
+    return false;
   }
 
   /// Fewer pieces beats more; among equal counts, longer last piece wins
@@ -257,10 +422,46 @@ Set<String> _loadBundled() {
   final String s = kStemsPacked;
   for (int i = 0; i < s.length; i++) {
     if (s.codeUnitAt(i) == 0x0A) {
-      if (i > start) out.add(s.substring(start, i));
+      if (i > start && !_hasImpossibleWordInitial(s, start, i)) {
+        out.add(s.substring(start, i));
+      }
       start = i + 1;
     }
   }
-  if (start < s.length) out.add(s.substring(start));
+  if (start < s.length && !_hasImpossibleWordInitial(s, start, s.length)) {
+    out.add(s.substring(start));
+  }
   return out;
+}
+
+/// Rejects csl-inflect decomposition artifacts whose first akshara is a
+/// consonant + virama cluster that Sanskrit phonotactics never allow
+/// word-initially. Two families:
+///   1. Homorganic nasal + plosive (ङ्क, ञ्च, ण्ट, न्त, म्प …). These are
+///      always word-medial; entries like `म्बुज` are mis-splits of words
+///      like `पदाम्बुज`.
+///   2. Any `र्…` or `ल्…` cluster. There is no such Sanskrit word-initial;
+///      `र` appears vowel-initial as `ऋ` and both `र` / `ल` appear only as
+///      the *second* element of a cluster. Entries like `र्थ` are
+///      mis-splits of `अर्थ`.
+bool _hasImpossibleWordInitial(String s, int start, int end) {
+  if (end - start < 3) return false;
+  if (s.codeUnitAt(start + 1) != 0x094D) return false;
+  final int c0 = s.codeUnitAt(start);
+  if (c0 == 0x0930 || c0 == 0x0932) return true; // र् or ल् — always invalid
+  final int c2 = s.codeUnitAt(start + 2);
+  switch (c0) {
+    case 0x0919: // ङ + kavarga
+      return c2 >= 0x0915 && c2 <= 0x0918;
+    case 0x091E: // ञ + cavarga
+      return c2 >= 0x091A && c2 <= 0x091D;
+    case 0x0923: // ण + Tavarga
+      return c2 >= 0x091F && c2 <= 0x0922;
+    case 0x0928: // न + tavarga
+      return c2 >= 0x0924 && c2 <= 0x0927;
+    case 0x092E: // म + pavarga
+      return c2 >= 0x092A && c2 <= 0x092D;
+    default:
+      return false;
+  }
 }

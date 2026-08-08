@@ -15,6 +15,8 @@ class TransliterationOptions {
     this.useNativeNumerals = false,
     this.splitCompounds = false,
     this.splitAcrossVowelSandhi = false,
+    this.splitAcrossInflection = false,
+    this.splitGreedyFallback = false,
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -79,4 +81,27 @@ class TransliterationOptions {
   /// a byte-for-byte transliteration of the input. Ignored when
   /// [splitCompounds] is `false` or the source isn't Devanagari.
   final bool splitAcrossVowelSandhi;
+
+  /// When `true` *and* [splitCompounds] is `true`, allow the *last* piece
+  /// of a compound to be `stem + case-ending` rather than a bare stem.
+  /// Only a small closed list of common nominal endings is recognised
+  /// (`म्`, `आम्`, `आन्`, `ौ`, `ाः`, `भ्याम्`, `ेभ्यः`, `ेषु`, `ैः`,
+  /// `ानाम्`). Essential for real Sanskrit text — devotional lines like
+  /// `राधाकृष्णपदाम्बुजभृङ्गम्` end with the accusative `-म्` which is
+  /// not a stem in itself. The last piece is emitted with its ending
+  /// intact. Ignored when [splitCompounds] is `false` or the source isn't
+  /// Devanagari.
+  final bool splitAcrossInflection;
+
+  /// When `true` *and* [splitCompounds] is `true`, long tokens that the
+  /// exact-cover splitter can't decompose are re-scanned left-to-right and
+  /// broken wherever a known stem starts. Unrecognised runs stay attached
+  /// to the following piece, so the output always covers the surface. Only
+  /// triggers for tokens of 16+ code units (roughly 5+ aksharas). Useful
+  /// for devotional / epic Sanskrit where the bundled csl-inflect stem set
+  /// has gaps: `प्राचेतसनारदप्रह्लादान्` becomes
+  /// `प्राचेतस​नारद​प्रह्लादान्` even though `प्रह्लाद` is missing.
+  /// Ignored when [splitCompounds] is `false` or the source isn't
+  /// Devanagari.
+  final bool splitGreedyFallback;
 }

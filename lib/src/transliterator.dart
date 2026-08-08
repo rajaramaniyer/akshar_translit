@@ -83,6 +83,8 @@ class Transliterator {
       s = DevanagariSegmenter.bundled().insertBreaks(
         s,
         allowVowelSandhi: options.splitAcrossVowelSandhi,
+        allowInflectedTail: options.splitAcrossInflection,
+        allowGreedyFallback: options.splitGreedyFallback,
       );
     }
 
