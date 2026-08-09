@@ -30,48 +30,111 @@ const String _matraLongA = '\u093E';
 
 bool _isFusibleMatra(int c) => _fusibleHeadPrepends.containsKey(c);
 
-/// Common nominal case-endings, longest first. When
-/// [DevanagariSegmenter.insertBreaks] runs with `allowInflectedTail: true`,
-/// the *last* piece of a compound may match `stem + suffix` where `stem`
-/// is in the dictionary and `suffix` is one of these.
+/// A split at position [seam] (in [token]) looks like it fell across a
+/// hidden vowel-sandhi seam if the left piece ends in `a`/`ā` and the
+/// right piece opens with a consonant carrying a "fused" matra (`े ो ै
+/// ौ` — the classic products of `a/ā + i/u/e/o` sandhi). Callers use
+/// this to reject splits like `हृद | योद्यान` (really `हृदय + उद्यान`)
+/// when sandhi undo is off.
+bool _looksLikeSandhiSeam(String token, int seam) {
+  if (seam <= 0 || seam + 1 >= token.length) return false;
+  final int leftLast = token.codeUnitAt(seam - 1);
+  final bool leftAaEnding = leftLast == 0x093E ||
+      (leftLast >= 0x0915 && leftLast <= 0x0939);
+  if (!leftAaEnding) return false;
+  final int rightFirst = token.codeUnitAt(seam);
+  if (rightFirst < 0x0915 || rightFirst > 0x0939) return false;
+  final int rightSecond = token.codeUnitAt(seam + 1);
+  return rightSecond == 0x0947 || // े
+      rightSecond == 0x094B ||    // ो
+      rightSecond == 0x0948 ||    // ै
+      rightSecond == 0x094C;      // ौ
+}
+
+/// Common nominal case-endings, longest first, paired with the minimum
+/// stem length (in code units) required for the match to fire. Longer,
+/// distinctive suffixes like `ाभ्याम्` are unambiguous enough that we can
+/// safely accept a 2-char stem (`कर`, `पद`); shorter suffixes like `म्`
+/// or `ौ` need a 3+-char stem so common verbal roots (`नह`, `कह`) don't
+/// spuriously fire as inflected nominals.
 ///
-/// This covers the accusative / nominative / genitive endings that show up
+/// When [DevanagariSegmenter.insertBreaks] runs with
+/// `allowInflectedTail: true`, the *last* piece of a compound may match
+/// `stem + suffix` where `stem` is in the dictionary.
+///
+/// Covers the accusative / nominative / genitive endings that show up
 /// in devotional and epic Sanskrit — enough to segment lines like
 /// `राधाकृष्णपदाम्बुजभृङ्गम्` where every noun compound ends in `-म्`,
-/// `-आम्`, or `-आन्`. It is intentionally *not* a full paradigm table —
+/// `-आम्`, or `-आन्`. Intentionally *not* a full paradigm table —
 /// larger lists get combinatorially more likely to fire on non-inflected
 /// tails and cause false splits.
-const List<String> _terminalInflectSuffixes = <String>[
-  'ाभ्याम्', // dual inst / dat / abl
-  'ेभ्यः',   // pl dat / abl
-  'ानाम्',   // gen pl (via a→ā sandhi)
-  'ेषु',      // pl loc
-  'ान्',      // acc pl m
-  'ाम्',      // acc sg f  (also gen pl a-stem)
-  'ैः',       // pl inst
-  'ाः',      // nom / acc pl f
-  'ौ',        // dual nom / acc / voc
-  'म्',       // acc sg m/n  ← the biggest single winner
+///
+/// Entries are `(surfaceSuffix, minStemLenChars, stemRestore)`. When a
+/// piece ends in `surfaceSuffix`, the stem is `piece[:-len(suffix)] +
+/// stemRestore` — non-empty `stemRestore` recovers a stem-final vowel
+/// that lengthens or fuses into the suffix (e.g. `आदि + n → आदीन्`, the
+/// i-stem acc.pl.m. — surface has `ीन्`, dictionary has `आदि`).
+const List<(String, int, String)> _terminalInflectSuffixes =
+    <(String, int, String)>[
+  ('ाभ्याम्', 2, ''), // dual inst / dat / abl
+  ('ेभ्यः', 2, ''),   // pl dat / abl
+  ('ानाम्', 2, ''),   // gen pl (via a→ā sandhi)
+  ('ेषु', 2, ''),     // pl loc
+  ('ान्', 3, ''),     // acc pl m
+  ('ाम्', 3, ''),     // acc sg f  (also gen pl a-stem)
+  ('ैः', 3, ''),      // pl inst
+  ('ाः', 3, ''),      // nom / acc pl f
+  ('ौ', 3, ''),       // dual nom / acc / voc
+  ('म्', 3, ''),      // acc sg m/n  ← the biggest single winner
+  ('ीन्', 3, 'ि'),    // i-stem acc.pl.m. (आदि → आदीन्)
 ];
 
 /// Sanskrit compound splitter — dictionary-driven.
+///
+/// **Purpose of the emitted ZWS characters.** Every U+200B this class
+/// inserts is a *line-wrap hint* for downstream renderers, not a claim
+/// that the two neighbouring pieces are the only or "correct" way to
+/// analyse the compound. The goal is to help a long devotional /
+/// classical Sanskrit compound wrap gracefully on narrow screens while
+/// still reading naturally to a Sanskrit-literate eye. It is
+/// deliberately *not* the goal to expose every possible sub-stem the
+/// lexicon can recognise: over-splitting (fragmenting `भजितम्` into
+/// `भजि|तम्`, or breaking short tokens like `अंशकरण`) makes text
+/// harder to read, not easier. Future maintainers: if you find
+/// yourself adding logic that produces *more* breaks on already-short
+/// or already-wrappable tokens, you are probably fighting the design.
 ///
 /// The default stem set comes from
 /// [csl-inflect](https://github.com/sanskrit-lexicon/csl-inflect)'s
 /// `lexnorm-all2.txt` (MIT).
 ///
-/// By default the splitter is *literal*: a compound is split only when its
-/// surface form is exactly the concatenation of two or more stems. Pass
-/// `allowVowelSandhi: true` (or, at the [Transliterator] layer, set
-/// `TransliterationOptions.splitAcrossVowelSandhi`) to additionally allow
-/// vowel-coalescence undo at seams. No consonant sandhi, visarga sandhi,
-/// or nasal-alternation logic is applied.
+/// By default the splitter is *literal*: seams are emitted only where
+/// the character immediately before and after the seam are unchanged
+/// from the input surface (no vowel-fusion has to be undone at that
+/// seam). Pass `allowVowelSandhi: true` (or, at the [Transliterator]
+/// layer, set `TransliterationOptions.splitAcrossVowelSandhi`) to
+/// instead emit the underlying dictionary forms of every piece — that
+/// mode rewrites fused matras and is meant for callers who want to
+/// *see* the sandhi undone (e.g. `yamaniyamāsana` → `yama niyama
+/// Asana` in ITRANS). No consonant sandhi, visarga sandhi, or
+/// nasal-alternation logic is applied.
 class DevanagariSegmenter {
   DevanagariSegmenter._(this._stems, this._minAksharas);
 
   /// The package-bundled singleton with the csl-inflect stem set and a
   /// 2-akshara minimum piece length.
   factory DevanagariSegmenter.bundled() => _bundled;
+
+  /// Segmenter that uses the bundled stem set *plus* [extraStems].
+  /// Convenient for callers who want to teach the splitter a small set
+  /// of names / domain words without providing a whole custom lexicon.
+  factory DevanagariSegmenter.bundledPlus(
+    Iterable<String> extraStems, {
+    int minAksharas = 2,
+  }) {
+    final Set<String> merged = <String>{..._loadBundled(), ...extraStems};
+    return DevanagariSegmenter._(merged, minAksharas);
+  }
 
   /// Provide a custom stem set — useful in tests, or if a caller wants to
   /// swap in domain-specific vocabulary.
@@ -86,6 +149,11 @@ class DevanagariSegmenter {
 
   final Set<String> _stems;
   final int _minAksharas;
+
+  /// Returns `true` if [form] is present in the loaded stem set. Exposed
+  /// for tooling and diagnostics — inflected surface forms will return
+  /// `false` (only bare-stem membership is reported).
+  bool containsStem(String form) => _stems.contains(form);
 
   /// Rewrites [input] by inserting U+200B between recognised stems inside
   /// each Devanagari token. Non-Devanagari runs (spaces, punctuation,
@@ -124,6 +192,27 @@ class DevanagariSegmenter {
     int greedyFallbackMinChars = 16,
   }) {
     if (input.isEmpty) return input;
+    // Idempotence guard: a line that already contains a ZWS is assumed
+    // pre-segmented (either by an earlier run or by hand) and passes
+    // through untouched. Applied per-line so a partially edited document
+    // still gets fresh segmentation on its unbroken lines.
+    if (input.contains(_zwsp) && input.contains('\n')) {
+      final List<String> lines = input.split('\n');
+      final StringBuffer joined = StringBuffer();
+      for (int li = 0; li < lines.length; li++) {
+        final String line = lines[li];
+        joined.write(line.contains(_zwsp)
+            ? line
+            : insertBreaks(line,
+                allowVowelSandhi: allowVowelSandhi,
+                allowInflectedTail: allowInflectedTail,
+                allowGreedyFallback: allowGreedyFallback,
+                greedyFallbackMinChars: greedyFallbackMinChars));
+        if (li < lines.length - 1) joined.write('\n');
+      }
+      return joined.toString();
+    }
+    if (input.contains(_zwsp)) return input;
     final StringBuffer out = StringBuffer();
     int i = 0;
     final int n = input.length;
@@ -148,8 +237,33 @@ class DevanagariSegmenter {
     return out.toString();
   }
 
+  /// Minimum length (code units) at which a token is a candidate for
+  /// segmentation at all. ZWS is a line-wrap hint, not an exhaustive
+  /// word-boundary marker — a short token wraps as one unit anyway, and
+  /// fragmenting it (`भजितम्` → `भजि|तम्`) hurts readability without
+  /// helping wrap.
+  static const int _minTokenSplitChars = 9;
+
+  /// Trigger for the greedy LTR + RTL refinement passes: a surface piece
+  /// this long or longer will be handed to greedy for a second look. Set
+  /// slightly higher than [_minTokenSplitChars] because we only want to
+  /// pull the messier greedy walker out for pieces that genuinely won't
+  /// fit on a narrow line.
+  static const int _greedyRefineMinChars = 11;
+
   /// Returns the segmented form of a single Devanagari token, or the token
   /// itself if no valid full segmentation exists.
+  ///
+  /// **Intent of every ZWS this method emits.** Downstream renderers
+  /// treat U+200B as an *optional* line-break opportunity. The goal is
+  /// therefore to help a long Sanskrit compound wrap gracefully — it is
+  /// NOT to expose every possible sub-stem the lexicon can recognise.
+  /// A reader should be able to look at the pieces between ZWSes and
+  /// read them as natural chunks; over-splitting (e.g. `भजितम्` →
+  /// `भजि|तम्`, or `अंशकरण` at 6 chars) makes text harder to read, not
+  /// easier. Future maintainers: please resist the temptation to add
+  /// more breaks "because the lexicon can see them" — this is a
+  /// deliberate design choice, not a limitation to work around.
   String _splitToken(
     String token,
     bool allowSandhi,
@@ -158,13 +272,116 @@ class DevanagariSegmenter {
     int greedyMinChars,
   ) {
     if (_stems.contains(token)) return token;
-    final List<int> boundaries = _aksharaBoundaries(token);
-    if (boundaries.length - 1 < 2 * _minAksharas) {
+
+    // Sandhi-on mode preserves the older "emit underlying pieces" contract
+    // — callers who explicitly asked to see sandhi undone want the
+    // dictionary forms between ZWSes (surface `भवा` shown as `भव`,
+    // `आदि`). Fall through to the simple DP + greedy pipeline unchanged.
+    if (allowSandhi) {
+      final List<int> boundaries = _aksharaBoundaries(token);
+      if (boundaries.length - 1 < 2 * _minAksharas) {
+        return allowGreedyFallback && token.length >= greedyMinChars
+            ? _greedySplit(token, boundaries, allowInflectedTail, true)
+            : token;
+      }
+      final _Best? cover =
+          _dpBestCover(token, boundaries, true, allowInflectedTail);
+      if (cover != null && cover.forms.length >= 2) {
+        return cover.forms.join(_zwsp);
+      }
       return allowGreedyFallback && token.length >= greedyMinChars
-          ? _greedySplit(token, boundaries, allowInflectedTail)
+          ? _greedySplit(token, boundaries, allowInflectedTail, true)
           : token;
     }
 
+    // Sandhi-off mode — the default, and where all our line-wrap tuning
+    // happens. Three-step pipeline:
+    //
+    //   1. Search the whole token with sandhi undo *on*. This is our
+    //      most powerful decomposition: it can see `कञ्ज + भव + आदि +
+    //      सुर + गण + वाञ्छितम्` inside `कञ्जभवादिसुरगणवाञ्छितम्`
+    //      even though the surface has `भव → आदि` and `गण → वाञ्` seams
+    //      fused into `भवा…` and `णवा…`.
+    //   2. Keep only seams that are *surface-safe* — i.e. the character
+    //      immediately before and after the seam is unchanged from the
+    //      input. That is what lets us insert a plain ZWS without ever
+    //      rewriting the surface. Fused seams silently merge back onto
+    //      the neighbouring piece.
+    //   3. For any surviving surface piece longer than
+    //      [_greedyRefineMinChars], take one more pass with the greedy
+    //      left-to-right walk to catch simple `stem|stem` compounds the
+    //      sandhi search missed (e.g. `बृन्दकूजितचरिताम्` →
+    //      `बृन्द|कूजित|चरिताम्`).
+    //   4. For any piece still longer than [_greedyRefineMinChars] after
+    //      LTR, apply the greedy right-to-left walk. RTL catches
+    //      compounds whose *head* isn't in the lexicon but whose tail
+    //      chain is (e.g. `व्यत्यस्तारुणचरणाम्भोजम्` — `व्यत्यस्त` is
+    //      missing, but `अम्भोजम्`, `चरणा`, `अरुण` are all findable
+    //      when we walk backwards).
+    if (token.length < _minTokenSplitChars) return token;
+
+    final List<int> boundaries = _aksharaBoundaries(token);
+    if (boundaries.length - 1 < 2 * _minAksharas) return token;
+
+    // Step 1 + 2: sandhi-aware search, surface-safe emit.
+    final _Best? cover =
+        _dpBestCover(token, boundaries, true, allowInflectedTail);
+    List<String> pieces;
+    if (cover != null && cover.forms.length >= 2) {
+      final String? rescued =
+          _renderSurfaceSafeSeams(token, boundaries, cover);
+      pieces = rescued == null ? <String>[token] : rescued.split(_zwsp);
+    } else {
+      pieces = <String>[token];
+    }
+
+    // Steps 3 + 4: greedy refinement of any long remaining piece. Greedy
+    // only pulls substrings from its input token so every seam it emits
+    // is surface-safe by construction. Gated by [allowGreedyFallback] so
+    // callers that want *only* dictionary-clean seams can opt out.
+    if (!allowGreedyFallback) return pieces.join(_zwsp);
+
+    // Step 3: LTR greedy for pieces longer than the refine threshold.
+    final List<String> afterLtr = <String>[];
+    for (final String piece in pieces) {
+      if (piece.length >= _greedyRefineMinChars) {
+        final List<int> pB = _aksharaBoundaries(piece);
+        if (pB.length - 1 >= 2 * _minAksharas) {
+          afterLtr.addAll(
+              _greedySplit(piece, pB, allowInflectedTail, false)
+                  .split(_zwsp));
+          continue;
+        }
+      }
+      afterLtr.add(piece);
+    }
+
+    // Step 4: RTL greedy for pieces LTR still couldn't shorten below the
+    // refine threshold. LTR that already produced short pieces is left
+    // alone.
+    final List<String> afterRtl = <String>[];
+    for (final String piece in afterLtr) {
+      if (piece.length >= _greedyRefineMinChars) {
+        final List<int> pB = _aksharaBoundaries(piece);
+        if (pB.length - 1 >= 2 * _minAksharas) {
+          afterRtl.addAll(
+              _greedySplitRtl(piece, pB, allowInflectedTail).split(_zwsp));
+          continue;
+        }
+      }
+      afterRtl.add(piece);
+    }
+    return afterRtl.join(_zwsp);
+  }
+
+  /// Bottom-up DP that finds the best full-cover segmentation of [token].
+  /// Returns `null` when no valid cover exists.
+  _Best? _dpBestCover(
+    String token,
+    List<int> boundaries,
+    bool allowSandhi,
+    bool allowInflectedTail,
+  ) {
     // best[b][ts] = best segmentation of token[0..boundaries[b]] whose
     // last piece has right-tail state `ts`:
     //   ts=0  literal (no fusion assumed at right seam)
@@ -176,7 +393,8 @@ class DevanagariSegmenter {
     final List<List<_Best?>> best = List<List<_Best?>>.generate(
         nB, (_) => <_Best?>[null, null, null],
         growable: false);
-    best[0][0] = const _Best(<String>[], 0);
+    best[0][0] = const _Best(
+        <String>[], <int>[], <int>[], 0, 1 << 30, 0);
 
     for (int end = 1; end < nB; end++) {
       final bool isTerminal = end == lastIdx;
@@ -190,7 +408,11 @@ class DevanagariSegmenter {
         if (tailState != 0 && (isTerminal || !endMatraFusible)) continue;
 
         for (int start = 0; start < end; start++) {
-          if (end - start < _minAksharas) continue;
+          // Sandhi mode lets a head-prepend (`अ`, `आ`, `इ`, …) contribute
+          // one underlying akshara, so surface pieces of `_minAksharas - 1`
+          // may still be legitimate — we recheck head-empty pieces below.
+          final int surfLower = allowSandhi ? _minAksharas - 1 : _minAksharas;
+          if (end - start < surfLower) continue;
 
           final bool isStart = start == 0;
           final int startOffset = boundaries[start];
@@ -225,6 +447,8 @@ class DevanagariSegmenter {
             }
 
             for (final String head in headPrepends) {
+              // Head-empty pieces still require the full surface minimum.
+              if (head.isEmpty && end - start < _minAksharas) continue;
               final String pieceForm = head + surfaceTail;
               if (!_isValidPiece(
                 pieceForm,
@@ -232,9 +456,17 @@ class DevanagariSegmenter {
                 allowInflectedTail: allowInflectedTail,
               )) continue;
 
+              final int pieceAks = end - start;
+              final int newMin = pieceAks < prev.minPieceAksharas
+                  ? pieceAks
+                  : prev.minPieceAksharas;
               final _Best cand = _Best(
                 <String>[...prev.forms, pieceForm],
-                end - start,
+                <int>[...prev.endBoundaries, end],
+                <int>[...prev.tailStates, tailState],
+                pieceAks,
+                newMin,
+                prev.sandhiSeamCount + (tailState == 0 ? 0 : 1),
               );
               final _Best? cur = best[end][tailState];
               if (cur == null || _isBetter(cand, cur)) {
@@ -246,13 +478,37 @@ class DevanagariSegmenter {
       }
     }
 
-    final _Best? result = best[lastIdx][0]; // terminal must be literal tail
-    if (result != null && result.forms.length >= 2) {
-      return result.forms.join(_zwsp);
+    return best[lastIdx][0]; // terminal must be literal tail
+  }
+
+  /// Given a sandhi-aware DP cover, emit ZWSPs only at the seams that lie
+  /// on a real akshara boundary in the surface — i.e., seams where the
+  /// ending piece has `tailState == 0`, meaning no matra was fused there.
+  /// Returns `null` when no such seam exists.
+  String? _renderSurfaceSafeSeams(
+    String token,
+    List<int> boundaries,
+    _Best cover,
+  ) {
+    if (cover.forms.length < 2) return null;
+
+    final List<int> safeBreaks = <int>[];
+    for (int i = 0; i < cover.forms.length - 1; i++) {
+      if (cover.tailStates[i] == 0) {
+        safeBreaks.add(boundaries[cover.endBoundaries[i]]);
+      }
     }
-    return allowGreedyFallback && token.length >= greedyMinChars
-        ? _greedySplit(token, boundaries, allowInflectedTail)
-        : token;
+    if (safeBreaks.isEmpty) return null;
+
+    final StringBuffer out = StringBuffer();
+    int prev = 0;
+    for (final int p in safeBreaks) {
+      out.write(token.substring(prev, p));
+      out.write(_zwsp);
+      prev = p;
+    }
+    out.write(token.substring(prev));
+    return out.toString();
   }
 
   /// Left-to-right longest-prefix scan used when the exact-cover DP can't
@@ -264,8 +520,8 @@ class DevanagariSegmenter {
   /// The output always covers the token's surface — no rewriting — so
   /// individual pieces may not all be dictionary words, but the reader
   /// gets useful visual breaks in long compounds.
-  String _greedySplit(
-      String token, List<int> boundaries, bool allowInflectedTail) {
+  String _greedySplit(String token, List<int> boundaries,
+      bool allowInflectedTail, bool allowSandhi) {
     final int nB = boundaries.length;
     final int n = nB - 1;
     if (n < 2) return token;
@@ -303,6 +559,17 @@ class DevanagariSegmenter {
                 token, boundaries[end], boundaries[end + 1])) {
           break;
         }
+        // Sandhi-seam guard: without sandhi undo, a seam with the
+        // classic `a/ā | Cे/ो/ै/ौ` signature is almost certainly slicing
+        // a fused akshara (e.g. `हृदय + उद्यान` → `हृदयोद्यान` shown as
+        // `हृद | योद्यान`). Reject *unless* the right side actually
+        // begins a known stem — that rules out the garbage-tail case
+        // without breaking legit compounds like `युत | कोमल`.
+        if (!allowSandhi && end < n &&
+            _looksLikeSandhiSeam(token, boundaries[end]) &&
+            !_anyStemStartsAt(token, boundaries, end)) {
+          continue;
+        }
         found = end;
         break;
       }
@@ -315,6 +582,52 @@ class DevanagariSegmenter {
       }
       if (found < n) breaks.add(found);
       pos = found;
+    }
+
+    // Trailing residue < 2 aksharas (typically a stray `म्` / `न्` / `त्`
+    // that the DP couldn't attach) — drop the last break so it fuses
+    // back onto the previous piece.
+    while (breaks.isNotEmpty && n - breaks.last < 2) {
+      breaks.removeLast();
+    }
+
+    // RTL rescue: after LTR completes, the trailing piece may still be a
+    // clean stem + inflection whose head isn't in the dictionary — e.g.
+    // `प्रमुखार्चितचरणान्` after `ब्रह्म|रुद्र|…` (or the whole token
+    // when LTR found nothing). Peel the longest recognised inflected
+    // terminal off that trailing piece and leave the head as an
+    // absorbed piece. Bare-stem tails are already handled by LTR
+    // greedy and short ones (like `तम्`) sneaking through here would
+    // create meaningless heads.
+    if (allowInflectedTail) {
+      final int tailStart = breaks.isEmpty ? 0 : breaks.last;
+      final int tailLen = n - tailStart;
+      if (tailLen >= 2 * _minAksharas) {
+        final String trailing =
+            token.substring(boundaries[tailStart], boundaries[n]);
+        final bool trailingValid = _stems.contains(trailing) ||
+            _isValidPiece(trailing,
+                isTerminal: true, allowInflectedTail: true);
+        if (!trailingValid) {
+          for (int mid = tailStart + _minAksharas;
+              mid <= n - _minAksharas;
+              mid++) {
+            final String tail =
+                token.substring(boundaries[mid], boundaries[n]);
+            // Inflected match only — reject bare stems (LTR's job).
+            final bool ok = !_stems.contains(tail) &&
+                _isValidPiece(tail,
+                    isTerminal: true, allowInflectedTail: true);
+            if (!ok) continue;
+            if (!allowSandhi &&
+                _looksLikeSandhiSeam(token, boundaries[mid])) {
+              continue;
+            }
+            breaks.add(mid);
+            break;
+          }
+        }
+      }
     }
 
     if (breaks.isEmpty) return token;
@@ -330,6 +643,102 @@ class DevanagariSegmenter {
     return out.toString();
   }
 
+  /// Right-to-left mirror of [_greedySplit]. Walks from the token's tail
+  /// backwards: at each position it looks for the *longest* piece that
+  /// ends there and is a known stem (or, on the very first iteration,
+  /// a valid inflected terminal). Complementary to LTR — LTR fails when
+  /// the token's *head* isn't in the lexicon (`व्यत्यस्त` missing means
+  /// no stem starts at position 0), but RTL can still peel a valid tail
+  /// like `अम्भोजम्`, `चरणा`, `अरुण` off the back.
+  ///
+  /// No sandhi-undo — every seam is a literal akshara boundary of the
+  /// input surface, so it's always safe to emit a ZWS there.
+  String _greedySplitRtl(String token, List<int> boundaries,
+      bool allowInflectedTail) {
+    final int n = boundaries.length - 1;
+    if (n < 2 * _minAksharas) return token;
+
+    // RTL requires a higher per-piece floor than LTR: it only fires on
+    // pieces the earlier passes couldn't cover, so bare 2-akshara dict
+    // hits (`जम्`, `तम्`, `कर`) are almost always noise fragments of a
+    // longer word rather than real compound tails.
+    const int _rtlMinAksharas = 3;
+    if (n < 2 * _rtlMinAksharas) return token;
+
+    // Break points stored as boundary-indices; filled while walking
+    // right-to-left, sorted ascending at the end.
+    final List<int> breaks = <int>[];
+    int end = n;
+    bool firstIter = true;
+    while (end >= 2 * _rtlMinAksharas) {
+      int foundStart = -1;
+      // Longest-first: smallest [start] gives longest piece.
+      for (int start = 0; end - start >= _rtlMinAksharas; start++) {
+        // Leading piece must itself be ≥ [_rtlMinAksharas] aksharas so
+        // we don't strand a preverb (`प्र`, `वि`, …) at the front.
+        if (start > 0 && start < _rtlMinAksharas) continue;
+        final String piece =
+            token.substring(boundaries[start], boundaries[end]);
+        final bool stemOk = _stems.contains(piece) ||
+            (firstIter && end == n && allowInflectedTail &&
+                _isValidPiece(piece,
+                    isTerminal: true, allowInflectedTail: true));
+        if (!stemOk) continue;
+        // Look-back: don't break here if the previous akshara ends with
+        // a phonotactically-impossible cluster from the *left* piece's
+        // perspective. We reuse the same "impossible word-initial"
+        // check on `boundaries[start]..boundaries[start+1]` — a break
+        // that produces `_greedySplit`-style garbage on either side is
+        // rejected here too.
+        if (start > 0 &&
+            _hasImpossibleWordInitial(
+                token, boundaries[start], boundaries[start + 1])) {
+          continue;
+        }
+        foundStart = start;
+        break;
+      }
+      if (foundStart == -1) {
+        end--;
+        continue;
+      }
+      if (foundStart > 0) breaks.add(foundStart);
+      end = foundStart;
+      firstIter = false;
+    }
+
+    if (breaks.isEmpty) return token;
+    breaks.sort();
+
+    // Drop any leading break that would leave a sub-min-akshara head.
+    while (breaks.isNotEmpty && breaks.first < _rtlMinAksharas) {
+      breaks.removeAt(0);
+    }
+    if (breaks.isEmpty) return token;
+
+    final StringBuffer out = StringBuffer();
+    int prev = 0;
+    for (final int b in breaks) {
+      out.write(token.substring(boundaries[prev], boundaries[b]));
+      out.write(_zwsp);
+      prev = b;
+    }
+    out.write(token.substring(boundaries[prev]));
+    return out.toString();
+  }
+
+
+  bool _anyStemStartsAt(String token, List<int> boundaries, int startIdx) {
+    final int nB = boundaries.length;
+    final int startOff = boundaries[startIdx];
+    for (int end = startIdx + _minAksharas; end < nB; end++) {
+      if (_stems.contains(token.substring(startOff, boundaries[end]))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// A piece is valid if it's a stem itself, or — for the terminal piece
   /// when [allowInflectedTail] is on — a stem plus one of a small set of
   /// nominal case endings.
@@ -340,24 +749,37 @@ class DevanagariSegmenter {
   }) {
     if (_stems.contains(pieceForm)) return true;
     if (!isTerminal || !allowInflectedTail) return false;
-    for (final String suf in _terminalInflectSuffixes) {
+    for (final (String suf, int minStemLen, String stemRestore)
+        in _terminalInflectSuffixes) {
       if (!pieceForm.endsWith(suf)) continue;
       final int stemLen = pieceForm.length - suf.length;
-      if (stemLen < 3) continue;
-      if (_stems.contains(pieceForm.substring(0, stemLen))) return true;
+      if (stemLen + stemRestore.length < minStemLen) continue;
+      final String stem = pieceForm.substring(0, stemLen) + stemRestore;
+      if (_stems.contains(stem)) return true;
     }
     return false;
   }
 
-  /// Fewer pieces beats more; among equal counts, longer last piece wins
-  /// (Sanskrit compounds are head-final — the last stem carries the head
-  /// noun, so preferring a longer tail matches the lexnorm decomposition
-  /// convention).
+  /// Fewer pieces beats more; among equal counts, MORE sandhi seams win
+  /// (a cover that recognises a real fused-matra seam like `सनक + आदीन्`
+  /// at surface `का` beats a chop that just found short 2-akshara literal
+  /// matches — `_renderSurfaceSafeSeams` then suppresses the unsafe seam
+  /// so the noisy literal cover collapses to a single readable piece).
+  /// Among still-equal candidates, longer last piece wins (Sanskrit
+  /// compounds are head-final — the last stem carries the head noun);
+  /// finally, longer minimum piece wins (avoids balanced-looking splits
+  /// like `उद्धवना|रद` beating `उद्धव|नारद`).
   bool _isBetter(_Best a, _Best b) {
     if (a.forms.length != b.forms.length) {
       return a.forms.length < b.forms.length;
     }
-    return a.lastPieceAksharas > b.lastPieceAksharas;
+    if (a.sandhiSeamCount != b.sandhiSeamCount) {
+      return a.sandhiSeamCount > b.sandhiSeamCount;
+    }
+    if (a.lastPieceAksharas != b.lastPieceAksharas) {
+      return a.lastPieceAksharas > b.lastPieceAksharas;
+    }
+    return a.minPieceAksharas > b.minPieceAksharas;
   }
 
   /// Returns the code-unit offsets of every akshara boundary in [token],
@@ -405,15 +827,38 @@ class DevanagariSegmenter {
 }
 
 class _Best {
-  const _Best(this.forms, this.lastPieceAksharas);
+  const _Best(this.forms, this.endBoundaries, this.tailStates,
+      this.lastPieceAksharas, this.minPieceAksharas, this.sandhiSeamCount);
 
   /// Dictionary/underlying form of each piece — what actually gets emitted
   /// between ZWSes. In literal mode this equals the surface substring; in
   /// sandhi mode it may differ (e.g. surface `नियमा` → underlying `नियम`).
   final List<String> forms;
 
+  /// Akshara-index at which each piece ends (parallel to [forms]). Used
+  /// by the surface-safe sandhi rescue to map DP piece boundaries back
+  /// to surface positions.
+  final List<int> endBoundaries;
+
+  /// Tail state of each piece (parallel to [forms]) — 0 literal, 1 or 2
+  /// sandhi-undone. The seam *after* piece `i` is surface-safe iff
+  /// `tailStates[i] == 0`.
+  final List<int> tailStates;
+
   /// Length in aksharas of the last piece — used as the tie-breaker.
   final int lastPieceAksharas;
+
+  /// Length in aksharas of the *shortest* piece so far. Used as a third-
+  /// tier tiebreak: given equal piece count and equal last-piece length,
+  /// we prefer the more balanced segmentation, since compounds like
+  /// `उद्धवना|रद|हृदय|विलासम्` (min = 2 aksharas) are almost always
+  /// wrong readings of `उद्धव|नारद|हृदय|विलासम्` (min = 3 aksharas).
+  final int minPieceAksharas;
+
+  /// Count of pieces with a non-zero `tailState` — i.e. how many seams
+  /// this cover interprets as a fused matra rather than a literal seam.
+  /// Used as the final tiebreak (see [DevanagariSegmenter._isBetter]).
+  final int sandhiSeamCount;
 }
 
 Set<String> _loadBundled() {
@@ -455,8 +900,8 @@ bool _hasImpossibleWordInitial(String s, int start, int end) {
       return c2 >= 0x0915 && c2 <= 0x0918;
     case 0x091E: // ञ + cavarga
       return c2 >= 0x091A && c2 <= 0x091D;
-    case 0x0923: // ण + Tavarga
-      return c2 >= 0x091F && c2 <= 0x0922;
+    case 0x0923: // ण + ट-vagas (or ANY cluster) — all impossible
+      return true;
     case 0x0928: // न + tavarga
       return c2 >= 0x0924 && c2 <= 0x0927;
     case 0x092E: // म + pavarga

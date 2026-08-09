@@ -17,6 +17,7 @@ class TransliterationOptions {
     this.splitAcrossVowelSandhi = false,
     this.splitAcrossInflection = false,
     this.splitGreedyFallback = false,
+    this.extraStems = const <String>{},
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -104,4 +105,11 @@ class TransliterationOptions {
   /// Ignored when [splitCompounds] is `false` or the source isn't
   /// Devanagari.
   final bool splitGreedyFallback;
+
+  /// Additional Devanagari stems to teach the compound splitter on top of
+  /// the bundled csl-inflect stem set. Useful for proper names or domain
+  /// vocabulary the bundled lexicon doesn't cover (e.g. `प्रह्लाद`,
+  /// `नारद`, `हृदयोद्यान`). Only consulted when [splitCompounds] is `true`
+  /// and the source is Devanagari.
+  final Set<String> extraStems;
 }

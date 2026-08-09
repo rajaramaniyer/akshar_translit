@@ -1,8 +1,9 @@
 // GENERATED FILE. Do not edit.
 // Source: csl-inflect (github.com/sanskrit-lexicon/csl-inflect), MIT.
-// Regenerate with: dart run tool/build_stems.dart <path-to-lexnorm-all2.txt>
+// Regenerate with: dart run tool/build_stems.dart <path-to-lexnorm-all2.txt> [extras.txt]
+// Supplementary stems: tool/extra_stems.txt (14 new, 2 dupes, 0 rejected)
 
-/// 66459 unique Devanagari stems, sorted.
+/// 66473 unique Devanagari stems, sorted.
 const String kStemsPacked = '''
 अंश
 अंशक
@@ -1839,6 +1840,7 @@ const String kStemsPacked = '''
 अमर्ष
 अमर्षण
 अमर्षिन्
+अमल
 अमलात्मन्
 अमलानन्द
 अमलोदरी
@@ -2447,6 +2449,7 @@ const String kStemsPacked = '''
 अलखान
 अलघूपल
 अलघूष्मन्
+अलङ्कृत
 अलङ्घनीय
 अलज
 अलजि
@@ -6306,6 +6309,7 @@ const String kStemsPacked = '''
 उद्धर्ष
 उद्धर्षिणी
 उद्धर्षिन्
+उद्धव
 उद्धान
 उद्धान्त
 उद्धार
@@ -17834,6 +17838,7 @@ const String kStemsPacked = '''
 चरणस
 चरणा
 चरणाक्ष
+चरणाङ्कित
 चरणानति
 चरणानमित
 चरणाभरण
@@ -29156,6 +29161,7 @@ const String kStemsPacked = '''
 निर्हरण
 निर्हार
 निर्हारक
+निर्हैतुक
 निर्ह्राद
 निलङ्गु
 निलम्भ
@@ -34275,6 +34281,7 @@ const String kStemsPacked = '''
 प्रउग
 प्रउगाध्याय
 प्रकट
+प्रकटन
 प्रकटम्
 प्रकटाप्रकट
 प्रकम्प
@@ -35530,7 +35537,9 @@ const String kStemsPacked = '''
 प्रहृष्ट
 प्रहृष्टक
 प्रहेलिका
+प्रह्लाद
 प्रह्लादन
+प्रह्लादान्
 प्रह्वी
 प्रा
 प्रांशु
@@ -35598,6 +35607,7 @@ const String kStemsPacked = '''
 प्राचीनावीतिन्
 प्राचीनोपवीत
 प्राचीर
+प्राचेतस
 प्राचैस्
 प्राच्य
 प्राच्यक
@@ -36051,6 +36061,7 @@ const String kStemsPacked = '''
 प्रेमामृत
 प्रेमार्द्र
 प्रेमाश्रु
+प्रेमिक
 प्रेमिन्
 प्रेमेन्दु
 प्रेमोक्त्य्
@@ -37448,6 +37459,7 @@ const String kStemsPacked = '''
 बृगल
 बृढ
 बृद
+बृन्द
 बृबद्
 बृबु
 बृबूक
@@ -37856,6 +37868,7 @@ const String kStemsPacked = '''
 भजनीय
 भजमान
 भजि
+भजित
 भजितव्य
 भजेन्य
 भज्य
@@ -38297,6 +38310,7 @@ const String kStemsPacked = '''
 भागवत
 भागवताचार्य
 भागवतामृत
+भागवतार्थ
 भागवताष्टक
 भागवती
 भागवतोत्पल
@@ -66041,6 +66055,7 @@ const String kStemsPacked = '''
 हृदयेशा
 हृदयेश्वर
 हृदयोदङ्क
+हृदयोद्यान
 हृदयोद्वर्तन
 हृदयोद्वेष्टन
 हृदयोन्माद

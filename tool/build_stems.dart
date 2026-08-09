@@ -3,13 +3,24 @@
 // lib/src/segmenter/data/stems_data.g.dart.
 //
 // Run from the akshar_translit package root:
-//   dart run tool/build_stems.dart <path-to-lexnorm-all2.txt>
+//   dart run tool/build_stems.dart <path-to-lexnorm-all2.txt> [extras.txt]
+//
+// The optional second argument overrides the default supplementary
+// word-list path (`tool/extra_stems.txt`). The default file is always
+// consulted if it exists — one Devanagari stem per line, `#` starts a
+// comment, blank lines ignored. Edit that file to teach the bundled
+// splitter proper names, epic characters, and samasa compounds the
+// csl-inflect lexicon doesn't cover; the next `build_stems` run bakes
+// them in automatically.
 //
 // Source data is https://github.com/sanskrit-lexicon/csl-inflect (MIT). See
 // ATTRIBUTION.md for the derived-data notice.
 
 import 'dart:convert';
 import 'dart:io';
+
+/// Default supplementary word-list. Merged into every build when present.
+const String _defaultExtrasPath = 'tool/extra_stems.txt';
 
 // SLP1 letter -> Devanagari independent vowel.
 const Map<String, String> _indep = <String, String>{
@@ -79,7 +90,8 @@ String? slp1ToDevanagari(String slp) {
 
 Future<void> main(List<String> argv) async {
   if (argv.isEmpty) {
-    stderr.writeln('usage: dart run tool/build_stems.dart <lexnorm-all2.txt>');
+    stderr.writeln(
+        'usage: dart run tool/build_stems.dart <lexnorm-all2.txt> [extras.txt]');
     exit(2);
   }
   final File input = File(argv[0]);
@@ -87,6 +99,18 @@ Future<void> main(List<String> argv) async {
     stderr.writeln('not found: ${argv[0]}');
     exit(2);
   }
+  // Default supplementary list — always merged when present so users can
+  // grow the bundled dictionary by editing a single file. An explicit
+  // second CLI arg overrides.
+  final String extrasPath = argv.length > 1 ? argv[1] : _defaultExtrasPath;
+  final File extrasFile = File(extrasPath);
+  final bool extrasExplicit = argv.length > 1;
+  final bool extrasUsed = await extrasFile.exists();
+  if (extrasExplicit && !extrasUsed) {
+    stderr.writeln('extras not found: $extrasPath');
+    exit(2);
+  }
+  final File? extras = extrasUsed ? extrasFile : null;
 
   final Set<String> stems = <String>{};
   int rowsSeen = 0;
@@ -131,6 +155,38 @@ Future<void> main(List<String> argv) async {
     }
   }
 
+  final int baseCount = stems.length;
+  int extrasSeen = 0;
+  int extrasAdded = 0;
+  int extrasSkipped = 0;
+  int extrasRejected = 0;
+  if (extras != null) {
+    await for (final String line in extras
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())) {
+      final int hashAt = line.indexOf('#');
+      final String stripped = (hashAt >= 0 ? line.substring(0, hashAt) : line)
+          .trim()
+          // Strip joiners so hand-typed entries with ZWJ/ZWNJ still match.
+          .replaceAll('\u200D', '')
+          .replaceAll('\u200C', '');
+      if (stripped.isEmpty) continue;
+      extrasSeen++;
+      if (!_isDevanagariWord(stripped)) {
+        stderr.writeln('  reject (non-Devanagari): $stripped');
+        extrasRejected++;
+        continue;
+      }
+      if (stems.contains(stripped)) {
+        extrasSkipped++;
+        continue;
+      }
+      stems.add(stripped);
+      extrasAdded++;
+    }
+  }
+
   final List<String> sorted = stems.toList()..sort();
 
   final Directory outDir =
@@ -142,7 +198,12 @@ Future<void> main(List<String> argv) async {
     ..writeln('// GENERATED FILE. Do not edit.')
     ..writeln('// Source: csl-inflect (github.com/sanskrit-lexicon/csl-inflect), MIT.')
     ..writeln('// Regenerate with: dart run tool/build_stems.dart '
-        '<path-to-lexnorm-all2.txt>')
+        '<path-to-lexnorm-all2.txt> [extras.txt]');
+  if (extras != null) {
+    buf.writeln('// Supplementary stems: ${extras.path} '
+        '($extrasAdded new, $extrasSkipped dupes, $extrasRejected rejected)');
+  }
+  buf
     ..writeln()
     ..writeln('/// ${sorted.length} unique Devanagari stems, sorted.')
     ..writeln("const String kStemsPacked = '''");
@@ -158,7 +219,28 @@ Future<void> main(List<String> argv) async {
     ..writeln('rows used:        $rowsUsed')
     ..writeln('pieces skipped:   $piecesSkipped (< 3 SLP1 chars)')
     ..writeln('pieces unmapped:  $piecesUnmappable')
+    ..writeln('base stems:       $baseCount');
+  if (extras != null) {
+    stdout
+      ..writeln('extras seen:      $extrasSeen')
+      ..writeln('extras added:     $extrasAdded')
+      ..writeln('extras dupes:     $extrasSkipped')
+      ..writeln('extras rejected:  $extrasRejected');
+  }
+  stdout
     ..writeln('unique stems:     ${sorted.length}')
     ..writeln('output:           ${outFile.path} '
         '(${await outFile.length()} bytes)');
+}
+
+/// Devanagari letters, matras, virama, anusvara, visarga, candrabindu,
+/// nukta. Whitespace and punctuation are rejected — supplementary lines
+/// are expected to hold a single stem, not phrases.
+bool _isDevanagariWord(String s) {
+  if (s.isEmpty) return false;
+  for (int i = 0; i < s.length; i++) {
+    final int c = s.codeUnitAt(i);
+    if (c < 0x0900 || c > 0x097F) return false;
+  }
+  return true;
 }

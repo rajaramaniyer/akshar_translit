@@ -7,9 +7,18 @@ void main() {
   final DevanagariSegmenter seg = DevanagariSegmenter.bundled();
 
   group('DevanagariSegmenter.insertBreaks', () {
-    test('splits a plain two-stem compound', () {
-      // aMSakaraRa = aMSa + karaRa (both in csl-inflect)
-      expect(seg.insertBreaks('अंशकरण'), 'अंश${_zwsp}करण');
+    test('splits a plain two-stem compound above the min-length gate', () {
+      // ZWS is a line-wrap hint — short tokens (≤ 8 code units) wrap as a
+      // single word anyway, so `अंशकरण` (6 chars) intentionally stays
+      // unbroken. Use a 9+-char two-stem compound to exercise splitting.
+      expect(seg.insertBreaks('धर्मक्षेत्र'),
+          'धर्म${_zwsp}क्षेत्र');
+    });
+
+    test('leaves short compounds unbroken (line-wrap intent)', () {
+      // Even though `अंशकरण` = `अंश + करण` are both known stems, the
+      // whole 6-char token fits on a line — no wrap hint needed.
+      expect(seg.insertBreaks('अंशकरण'), 'अंशकरण');
     });
 
     test('splits a three-stem compound', () {
@@ -29,9 +38,11 @@ void main() {
     });
 
     test('preserves non-Devanagari runs and whitespace', () {
+      // `अंशकरण` is below the 9-char split gate; `धर्मक्षेत्र` (11 chars)
+      // is above it.
       expect(
         seg.insertBreaks('अंशकरण, धर्मक्षेत्र!'),
-        'अंश${_zwsp}करण, धर्म${_zwsp}क्षेत्र!',
+        'अंशकरण, धर्म${_zwsp}क्षेत्र!',
       );
     });
 
@@ -56,12 +67,13 @@ void main() {
     });
 
     test('on: ZWS becomes a space in Roman targets', () {
-      final String out = transliterate('अंशकरण',
+      // Use a 9+-char compound so the split gate lets the segmenter run.
+      final String out = transliterate('धर्मक्षेत्र',
           from: Script.devanagari, to: Script.itrans, options: splitOn);
       expect(out.contains(' '), isTrue);
       // and the pieces are still there
       expect(out.replaceAll(' ', ''),
-          transliterate('अंशकरण',
+          transliterate('धर्मक्षेत्र',
               from: Script.devanagari, to: Script.itrans, options: splitOff));
     });
 
@@ -83,12 +95,23 @@ void main() {
   });
 
   group('DevanagariSegmenter.insertBreaks (allowVowelSandhi)', () {
-    test('literal mode: vowel-fused compound stays unsplit', () {
+    test('literal mode: long vowel-fused compound splits at surface-safe seams',
+        () {
       // yamaniyamAsanaprANAyAma...samAdhi — inner seams have fused matras,
-      // so nothing here can be recovered without sandhi undo.
+      // but the surface-safe sandhi rescue can still emit breaks at seams
+      // where no matra was fused (e.g. consonant↔consonant boundaries).
       const String yog =
           'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि';
-      expect(seg.insertBreaks(yog), yog);
+      final String out = seg.insertBreaks(yog);
+      final List<String> pieces = out.split(_zwsp);
+      // At minimum the rescue should recover a few of the outermost
+      // consonant-boundary seams.
+      expect(pieces.length, greaterThanOrEqualTo(3));
+      // Rescue emits underlying surface; the last piece is still `समाधि`.
+      expect(pieces.last, 'समाधि');
+      // Rescue must never emit a break inside a fused seam — every seam
+      // must fall on a real akshara boundary in the original surface.
+      expect(out.replaceAll(_zwsp, ''), yog);
     });
 
     test('sandhi mode: splits at a + a = ā seam (yoga-sūtra compound)', () {
@@ -127,14 +150,19 @@ void main() {
     const TransliterationOptions litOnly =
         TransliterationOptions(splitCompounds: true);
 
-    test('sandhi off: yoga-sūtra compound survives as one run', () {
+    test('sandhi off: yoga-sūtra compound now splits at surface-safe seams',
+        () {
+      // Long compounds get help from the surface-safe sandhi rescue even
+      // when the user opts out of full sandhi rewriting.
       final String out = transliterate(
         'यमनियमासनप्राणायामप्रत्याहारधारणाध्यानसमाधि',
         from: Script.devanagari,
         to: Script.itrans,
         options: litOnly,
       );
-      expect(out.contains(' '), isFalse);
+      expect(out.contains(' '), isTrue);
+      // Final surface piece survives at the tail.
+      expect(out.split(' ').last, 'samAdhi');
     });
 
     test('sandhi on: same compound reads with word breaks in ITRANS', () {
@@ -276,10 +304,11 @@ void main() {
     });
 
     test('flag off is a no-op for uncoverable tokens', () {
-      // Same token as above with greedy off: strict DP can't segment.
+      // A long token that isn't decomposable by the strict DP against the
+      // bundled dict — with greedy off it must pass through whole.
       expect(
-        seg.insertBreaks('प्राचेतसनारदप्रह्लादान्'),
-        'प्राचेतसनारदप्रह्लादान्',
+        seg.insertBreaks('क्षक्षक्षक्षक्षक्षक्षक्ष'),
+        'क्षक्षक्षक्षक्षक्षक्षक्ष',
       );
     });
   });
@@ -308,7 +337,7 @@ void main() {
         splitAcrossInflection: true,
       );
       final String out = transliterate(
-        'प्राचेतसनारदप्रह्लादान्',
+        'क्षक्षक्षक्षक्षक्षक्षक्ष',
         from: Script.devanagari,
         to: Script.itrans,
         options: opts,

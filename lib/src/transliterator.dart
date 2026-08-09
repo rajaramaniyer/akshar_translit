@@ -75,7 +75,7 @@ class Transliterator {
       // Same-script identity is a no-op unless the compound-split
       // preprocessor is asked for and its Devanagari stem set is usable.
       if (options.splitCompounds && from == Script.devanagari) {
-        return DevanagariSegmenter.bundled().insertBreaks(
+        return _segmenterFor(options).insertBreaks(
           input,
           allowVowelSandhi: options.splitAcrossVowelSandhi,
           allowInflectedTail: options.splitAcrossInflection,
@@ -92,7 +92,7 @@ class Transliterator {
     // Optional compound-split preprocessor. Only meaningful for Devanagari
     // sources (the bundled stem set is Devanagari); silently no-op otherwise.
     if (options.splitCompounds && from == Script.devanagari) {
-      s = DevanagariSegmenter.bundled().insertBreaks(
+      s = _segmenterFor(options).insertBreaks(
         s,
         allowVowelSandhi: options.splitAcrossVowelSandhi,
         allowInflectedTail: options.splitAcrossInflection,
@@ -142,6 +142,13 @@ class Transliterator {
 
     return s;
   }
+
+  /// Bundled segmenter, unless the caller provided [TransliterationOptions.extraStems]
+  /// in which case a one-shot segmenter with those extras layered on top.
+  DevanagariSegmenter _segmenterFor(TransliterationOptions options) =>
+      options.extraStems.isEmpty
+          ? DevanagariSegmenter.bundled()
+          : DevanagariSegmenter.bundledPlus(options.extraStems);
 
   String _removeJoiners(String s) =>
       s.replaceAll(_zwj, '').replaceAll(_zwnj, '');
