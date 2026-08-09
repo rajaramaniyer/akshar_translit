@@ -140,6 +140,22 @@ void main() {
       expect(seg.insertBreaks('धर्मक्षेत्रपति', allowVowelSandhi: true),
           'धर्म${_zwsp}क्षेत्र${_zwsp}पति');
     });
+
+    test('sandhi mode: does not shave off case-ending fragments', () {
+      // Inflected forms whose ending happens to match a short "stem" in
+      // the lexicon (`इन`, `एन`, `अनि`, `आय`, …) must not be split into
+      // `stem + ending`. All three fingerprints below share the same
+      // structure: a 1-akshara surface right piece that would only become
+      // a 2-akshara stem via head-prepend from vowel-fusion undo.
+      expect(seg.insertBreaks('मुक्तेन', allowVowelSandhi: true), 'मुक्तेन');
+      expect(seg.insertBreaks('मानानि', allowVowelSandhi: true), 'मानानि');
+      expect(
+          seg.insertBreaks('महेन्द्राय', allowVowelSandhi: true), 'महेन्द्राय');
+      // The compound पादप + मुक्तेन must still be recognised — sandhi mode
+      // just refuses to split `मुक्तेन` any further.
+      expect(seg.insertBreaks('पादपमुक्तेन', allowVowelSandhi: true),
+          anyOf(equals('पादपमुक्तेन'), equals('पादप${_zwsp}मुक्तेन')));
+    });
   });
 
   group('Transliterator.splitAcrossVowelSandhi option', () {

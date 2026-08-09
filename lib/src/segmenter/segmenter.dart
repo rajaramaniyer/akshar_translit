@@ -442,7 +442,8 @@ class DevanagariSegmenter {
             : token;
       }
       final _Best? cover =
-          _dpBestCover(token, boundaries, true, allowInflectedTail);
+          _dpBestCover(token, boundaries, true, allowInflectedTail,
+              strictHeadPrepend: true);
       if (cover != null && cover.forms.length >= 2) {
         return cover.forms.join(_zwsp);
       }
@@ -533,12 +534,20 @@ class DevanagariSegmenter {
 
   /// Bottom-up DP that finds the best full-cover segmentation of [token].
   /// Returns `null` when no valid cover exists.
+  ///
+  /// [strictHeadPrepend] gates the tighter surface-minimum on
+  /// head-prepended pieces — see the guard inside for the rationale. On
+  /// for sandhi-emit mode (where the DP's own decisions become the ZWS
+  /// seams the user sees); off for literal-mode Step 1 (where the DP is
+  /// only used as a search over possible covers so
+  /// `_renderSurfaceSafeSeams` can pick out surface-safe seams).
   _Best? _dpBestCover(
     String token,
     List<int> boundaries,
     bool allowSandhi,
-    bool allowInflectedTail,
-  ) {
+    bool allowInflectedTail, {
+    bool strictHeadPrepend = false,
+  }) {
     // best[b][ts] = best segmentation of token[0..boundaries[b]] whose
     // last piece has right-tail state `ts`:
     //   ts=0  literal (no fusion assumed at right seam)
@@ -568,7 +577,15 @@ class DevanagariSegmenter {
           // Sandhi mode lets a head-prepend (`अ`, `आ`, `इ`, …) contribute
           // one underlying akshara, so surface pieces of `_minAksharas - 1`
           // may still be legitimate — we recheck head-empty pieces below.
-          final int surfLower = allowSandhi ? _minAksharas - 1 : _minAksharas;
+          // When [strictHeadPrepend] is on, we require the full surface
+          // minimum for head-prepended pieces too — that filters out
+          // short case-ending fragments in the stem set (`इन`, `एन`,
+          // `अनि`, `आय`, …) hijacking the last piece of an inflected form
+          // (`मुक्तेन → मुक्त + इन`, `पीड्यमानानि → पीड्यमान + अनि`,
+          // `महेन्द्राय → महेन्द्र + आय`).
+          final int surfLower = (allowSandhi && !strictHeadPrepend)
+              ? _minAksharas - 1
+              : _minAksharas;
           if (end - start < surfLower) continue;
 
           final bool isStart = start == 0;
