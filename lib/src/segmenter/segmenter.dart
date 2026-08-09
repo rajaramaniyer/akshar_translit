@@ -80,6 +80,7 @@ const List<(String, int, String)> _terminalInflectSuffixes =
   ('ेभ्यः', 2, ''),   // pl dat / abl
   ('ानाम्', 2, ''),   // gen pl (via a→ā sandhi)
   ('ेषु', 2, ''),     // pl loc
+  ('भिः', 2, ''),     // pl inst (i/u/consonant stems: हरिभिः, कविभिः)
   ('ान्', 3, ''),     // acc pl m
   ('ाम्', 3, ''),     // acc sg f  (also gen pl a-stem)
   ('ैः', 3, ''),      // pl inst
@@ -87,7 +88,111 @@ const List<(String, int, String)> _terminalInflectSuffixes =
   ('ौ', 3, ''),       // dual nom / acc / voc
   ('म्', 3, ''),      // acc sg m/n  ← the biggest single winner
   ('ीन्', 3, 'ि'),    // i-stem acc.pl.m. (आदि → आदीन्)
+  ('िः', 3, 'ि'),     // nom sg m i-stem (हरि → हरिः, कवि → कविः)
+  ('ुः', 3, 'ु'),     // nom sg m u-stem (गुरु → गुरुः)
 ];
+
+/// Visarga-ending inflectional suffixes attested at end of Sanskrit
+/// words. Used *only* by the visarga-sandhi preprocess pass to
+/// validate that a candidate LEFT chunk (with visarga restored) looks
+/// like a real inflected form. Ordered longest-first. Each entry is
+/// `(surface, minStemLen)`, minStemLen in code units.
+const List<(String, int)> _visargaEndings = <(String, int)>[
+  ('ेभ्यः', 3),
+  ('भ्यः', 3),
+  ('भिः', 3),
+  ('ैः', 3),
+  ('ोः', 3),
+  ('ेः', 3),
+  ('ीः', 3),
+  ('ूः', 3),
+  ('ुः', 3),
+  ('िः', 3),
+  ('ाः', 3),
+];
+
+/// Strict subset of [_visargaEndings] — used for the `-ष्ट/ठ` and
+/// `-स्त/थ` surface patterns, whose intra-word cluster ambiguity is
+/// severe (`आविष्ट`, `प्रविष्ट`, `अस्ति`, `कष्ट`, etc.). Only accept
+/// visarga seams here when the LEFT ends in a distinctive
+/// multi-akshara suffix that's rare in unrelated intra-word clusters.
+const List<(String, int)> _strictVisargaEndings = <(String, int)>[
+  ('ेभ्यः', 3),
+  ('भ्यः', 3),
+  ('भिः', 3),
+  ('ैः', 3),
+  ('ाः', 3),
+];
+
+/// Map from vowel matra to corresponding independent vowel. Used only
+/// by the visarga preprocess to reconstruct form-(b) surfaces —
+/// `-भिराविष्टम्` (`-भिः + आविष्टम्` written with the following `आ`
+/// absorbed as an `ा` matra on the visarga-transformed `र`) — into
+/// their split underlying form.
+const Map<int, int> _matraToIndependentVowel = <int, int>{
+  0x093E: 0x0906, // ा → आ
+  0x093F: 0x0907, // ि → इ
+  0x0940: 0x0908, // ी → ई
+  0x0941: 0x0909, // ु → उ
+  0x0942: 0x090A, // ू → ऊ
+  0x0947: 0x090F, // े → ए
+  0x0948: 0x0910, // ै → ऐ
+  0x094B: 0x0913, // ो → ओ
+  0x094C: 0x0914, // ौ → औ
+};
+
+/// Visarga-sandhi surface markers at a token-internal seam: the
+/// halant-terminated consonant that *replaces* the underlying `-ः`
+/// depends on the following sound. Keys are the halant consonant
+/// (`र`/`श`/`ष`/`स`) code units; values decide whether a given
+/// next-character makes it a valid visarga-sandhi surface.
+///
+///   `-र्` → visarga → `r` before vowel or voiced consonant (only after
+///                     a non-`a`/`ā` preceding vowel).
+///   `-श्` → visarga → `ś` before palatal `च` or `छ`.
+///   `-ष्` → visarga → `ṣ` before retroflex `ट` or `ठ`.
+///   `-स्` → visarga → `s` before dental `त` or `थ`.
+bool _visargaSurfaceMatches(int halantCons, int nextCh) {
+  switch (halantCons) {
+    case 0x0930: // र
+      return _isVowelOrVoicedConsonantStart(nextCh);
+    case 0x0936: // श
+      return nextCh == 0x091A || nextCh == 0x091B;
+    case 0x0937: // ष
+      return nextCh == 0x091F || nextCh == 0x0920;
+    case 0x0938: // स
+      return nextCh == 0x0924 || nextCh == 0x0925;
+    default:
+      return false;
+  }
+}
+
+/// True if [c] is an independent Devanagari vowel or a voiced Devanagari
+/// consonant. Used by the visarga → `r` rule.
+bool _isVowelOrVoicedConsonantStart(int c) {
+  // Independent vowels: अ..औ + short ऍ/ऑ range.
+  if (c >= 0x0904 && c <= 0x0914) return true;
+  // Consonants: allow the voiced set only.
+  if (c < 0x0915 || c > 0x0939) return false;
+  // Voiceless (or self `र`): excluded.
+  const Set<int> excluded = <int>{
+    0x0915, // क
+    0x0916, // ख
+    0x091A, // च
+    0x091B, // छ
+    0x091F, // ट
+    0x0920, // ठ
+    0x0924, // त
+    0x0925, // थ
+    0x092A, // प
+    0x092B, // फ
+    0x0930, // र (self — avoid geminate weirdness)
+    0x0936, // श
+    0x0937, // ष
+    0x0938, // स
+  };
+  return !excluded.contains(c);
+}
 
 /// Sanskrit compound splitter — dictionary-driven.
 ///
@@ -269,9 +374,61 @@ class DevanagariSegmenter {
     bool allowSandhi,
     bool allowInflectedTail,
     bool allowGreedyFallback,
-    int greedyMinChars,
-  ) {
+    int greedyMinChars, {
+    bool skipVisargaPreprocess = false,
+  }) {
     if (_stems.contains(token)) return token;
+
+    // Visarga-sandhi preprocess. Only fires in sandhi-on mode: the
+    // caller has opted into "undo Sanskrit sandhi at word junctures",
+    // which the flag [DevanagariSegmenter.insertBreaks]'s
+    // `allowVowelSandhi` gates. Handles four surface patterns where a
+    // trailing `-ः` (visarga) has been welded across a word juncture:
+    //
+    //   `-र्V`    — visarga → `r` before vowel / voiced consonant
+    //               (also `-रा-` / `-रि-` etc., where the following
+    //                indep vowel got written as a matra on `र`)
+    //   `-श्च/छ`  — visarga → `ś` before palatal
+    //   `-ष्ट/ठ`  — visarga → `ṣ` before retroflex
+    //   `-स्त/थ`  — visarga → `s` before dental
+    //
+    // Each candidate seam is validated by restoring the visarga on
+    // the LEFT chunk and checking it against a known visarga-carrying
+    // inflected form (`-भिः`, `-ैः`, `-िः`, …) whose stem is
+    // dictionary-recognised. In line with the rest of sandhi-on mode,
+    // pieces are emitted in their **underlying** form — LEFT gets `-ः`
+    // appended in place of the seam's surface consonant, and (for the
+    // `-रा-` form) the RIGHT gets its starting vowel re-independent-ised
+    // — so the ZWSes fall between clean dictionary-shaped chunks.
+    if (allowSandhi && !skipVisargaPreprocess) {
+      final List<_VisargaSeam> seams = _findVisargaSeams(token);
+      if (seams.isNotEmpty) {
+        final StringBuffer out = StringBuffer();
+        int cursor = 0;
+        String pendingPrefix = '';
+        for (int idx = 0; idx <= seams.length; idx++) {
+          final bool isLast = idx == seams.length;
+          final int chunkEnd = isLast ? token.length : seams[idx].leftEnd;
+          String chunk = pendingPrefix + token.substring(cursor, chunkEnd);
+          if (!isLast) chunk = '$chunk\u0903'; // append visarga
+          final String piece = _splitToken(
+            chunk,
+            allowSandhi,
+            allowInflectedTail,
+            allowGreedyFallback,
+            greedyMinChars,
+            skipVisargaPreprocess: true,
+          );
+          if (idx > 0) out.write(_zwsp);
+          out.write(piece);
+          if (!isLast) {
+            cursor = seams[idx].rightStart;
+            pendingPrefix = seams[idx].rightPrepend;
+          }
+        }
+        return out.toString();
+      }
+    }
 
     // Sandhi-on mode preserves the older "emit underlying pieces" contract
     // — callers who explicitly asked to see sandhi undone want the
@@ -760,6 +917,134 @@ class DevanagariSegmenter {
     return false;
   }
 
+  /// Scan [token] left-to-right for surface visarga-sandhi markers that
+  /// look like they've welded two words together at a juncture. Handles
+  /// two writing conventions:
+  ///
+  ///   Form (a) — halant + independent vowel / consonant:
+  ///     `-र्V`  after non-`a`/`ā` vowel, `-श्च/छ`, `-ष्ट/ठ`, `-स्त/थ`.
+  ///
+  ///   Form (b) — `र` written with a vowel matra (only `र`, because it
+  ///     is the only visarga-transformed consonant that can precede an
+  ///     independent vowel that then gets absorbed as a matra):
+  ///     `-र + <matra>` at an akshara boundary, after non-`a`/`ā` vowel.
+  ///     E.g. `-भिराविष्टम्` = `-भिः + आविष्टम्` written with `आ`
+  ///     collapsed onto `र` as `ा`.
+  ///
+  /// At each candidate the LEFT half is provisionally reconstructed by
+  /// restoring `-ः` and checked with [_isValidVisargaTail]. Returns a
+  /// [_VisargaSeam] record for every validated seam so the caller can
+  /// splice in the underlying `-ः` on the LEFT and the corresponding
+  /// independent vowel on the RIGHT.
+  List<_VisargaSeam> _findVisargaSeams(String token) {
+    final List<_VisargaSeam> seams = <_VisargaSeam>[];
+    final int n = token.length;
+    if (n < 4) return seams;
+    // Akshara boundaries are needed to gate form (b) to real
+    // word-shape seams (a `र + ा` that's part of a conjunct like
+    // `र्तार` shouldn't split).
+    final Set<int> boundarySet = _aksharaBoundaries(token).toSet();
+    int i = 1;
+    while (i < n - 1) {
+      final int cv = token.codeUnitAt(i);
+      if (cv != 0x0930 && cv != 0x0936 && cv != 0x0937 && cv != 0x0938) {
+        i++;
+        continue;
+      }
+      final int next = token.codeUnitAt(i + 1);
+      _VisargaSeam? seam;
+      if (next == _viramaCU && i + 2 < n) {
+        // Form (a): C्<next>
+        final int nx2 = token.codeUnitAt(i + 2);
+        if (_visargaSurfaceMatches(cv, nx2) &&
+            (cv != 0x0930 || _precedingVowelIsNonA(token, i))) {
+          seam = _VisargaSeam(i, i + 2, '', cv);
+        }
+      } else if (cv == 0x0930 &&
+          _matraToIndependentVowel.containsKey(next)) {
+        // Form (b): र<matra> — the `र` is a visarga-transformed
+        // consonant and the matra is the following word's opening
+        // vowel written as a matra.
+        if (boundarySet.contains(i) && _precedingVowelIsNonA(token, i)) {
+          final String indep =
+              String.fromCharCode(_matraToIndependentVowel[next]!);
+          seam = _VisargaSeam(i, i + 2, indep, cv);
+        }
+      }
+      if (seam == null) {
+        i++;
+        continue;
+      }
+      final String leftUnderlying =
+          '${token.substring(0, seam.leftEnd)}\u0903';
+      if (!_isValidVisargaTail(leftUnderlying, cv)) {
+        i++;
+        continue;
+      }
+      seams.add(seam);
+      i = seam.rightStart;
+    }
+    return seams;
+  }
+
+  /// True if [leftUnderlying] (which must end in `ः`) matches one of
+  /// the visarga endings appropriate to the halant consonant
+  /// [halantCons] that formed the surface seam, with a
+  /// dictionary-recognised stem. The `-ष्ट/ठ` and `-स्त/थ` surface
+  /// patterns use the stricter [_strictVisargaEndings] table because
+  /// they clash constantly with intra-word clusters (`आविष्ट`,
+  /// `अस्ति`, `कष्ट`, `पश्चात्` — well, that last one is `-श्च`, but
+  /// the same class of noise). The stem check accepts a direct dict
+  /// hit, or any ≥ 2-akshara tail of the stem being a dict entry
+  /// (handles the case where the LEFT of a visarga seam is itself a
+  /// compound whose last member is what carries the inflection).
+  bool _isValidVisargaTail(String leftUnderlying, int halantCons) {
+    final List<(String, int)> endings =
+        (halantCons == 0x0937 || halantCons == 0x0938)
+            ? _strictVisargaEndings
+            : _visargaEndings;
+    for (final (String suf, int minStem) in endings) {
+      if (!leftUnderlying.endsWith(suf)) continue;
+      final int stemLen = leftUnderlying.length - suf.length;
+      if (stemLen < minStem) continue;
+      final String stem = leftUnderlying.substring(0, stemLen);
+      if (_stems.contains(stem)) return true;
+      final List<int> b = _aksharaBoundaries(stem);
+      // b has length = num_aksharas + 1. Try every non-trivial tail
+      // starting at akshara boundary bi > 0.
+      for (int bi = 1; bi < b.length - 1; bi++) {
+        // Require the tail to be at least 2 aksharas.
+        if (b.length - 1 - bi < 2) continue;
+        final String tail = stem.substring(b[bi]);
+        if (_stems.contains(tail)) return true;
+      }
+    }
+    return false;
+  }
+
+  /// True if the vowel of the akshara ending at [visargaConsPos] - 1
+  /// is something other than `a` or `ā`. Walks backward past nasal /
+  /// visarga / vedic-tone marks so `-ैं` still reads as `ai`. Used to
+  /// gate the `-र्` visarga-sandhi rule (which fires only after
+  /// non-`a`/`ā` vowels).
+  bool _precedingVowelIsNonA(String token, int visargaConsPos) {
+    int p = visargaConsPos - 1;
+    while (p >= 0) {
+      final int c = token.codeUnitAt(p);
+      if (c == 0x0901 ||
+          c == 0x0902 ||
+          c == 0x0903 ||
+          (c >= 0x0951 && c <= 0x0957)) {
+        p--;
+        continue;
+      }
+      if (c == 0x093E) return false; // ा
+      if (c >= 0x093F && c <= 0x094C) return true; // other matras
+      return false; // consonant → implicit `a`
+    }
+    return false;
+  }
+
   /// Fewer pieces beats more; among equal counts, MORE sandhi seams win
   /// (a cover that recognises a real fused-matra seam like `सनक + आदीन्`
   /// at surface `का` beats a chop that just found short 2-akshara literal
@@ -824,6 +1109,23 @@ class DevanagariSegmenter {
   static const int _viramaCU = 0x094D;
 
   static bool _isDevanagariLetter(int c) => c >= 0x0900 && c <= 0x097F;
+}
+
+/// A single visarga-sandhi seam detected by
+/// [DevanagariSegmenter._findVisargaSeams]. The seam splits [token]
+/// into a LEFT part `token[.. leftEnd]` (to which the caller appends
+/// `-ः` to recover the underlying form) and a RIGHT part
+/// `rightPrepend + token[rightStart ..]` (where [rightPrepend] carries
+/// the RIGHT word's opening independent vowel when the surface had
+/// absorbed it as a matra on the visarga-transformed consonant).
+class _VisargaSeam {
+  const _VisargaSeam(
+      this.leftEnd, this.rightStart, this.rightPrepend, this.halantCons);
+
+  final int leftEnd;
+  final int rightStart;
+  final String rightPrepend;
+  final int halantCons;
 }
 
 class _Best {

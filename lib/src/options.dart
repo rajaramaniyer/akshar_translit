@@ -18,6 +18,7 @@ class TransliterationOptions {
     this.splitAcrossInflection = false,
     this.splitGreedyFallback = false,
     this.extraStems = const <String>{},
+    this.preservePeriod = false,
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -112,4 +113,20 @@ class TransliterationOptions {
   /// `नारद`, `हृदयोद्यान`). Only consulted when [splitCompounds] is `true`
   /// and the source is Devanagari.
   final Set<String> extraStems;
+
+  /// When `true`, the ASCII period `.` is never treated as a danda sign in
+  /// either direction. That is:
+  /// - For Roman sources (`itrans`, `romanReadable`) a literal `.` in the
+  ///   input passes through to the target unchanged instead of being
+  ///   substituted with the target's danda (`।` in Devanagari, `.` in
+  ///   Roman targets — which was the same character but happened via the
+  ///   danda mapping).
+  /// - For Indic targets a target's danda position is skipped from the
+  ///   substitution table when the source-side sign is exactly `.`.
+  ///
+  /// Doubled `..` (danda-danda) is likewise left alone. Use this when your
+  /// input mixes English punctuation with romanised Indic content and you
+  /// don't want stray `.`s to become `।`. Default `false` (preserves the
+  /// upstream Aksharamukha behaviour where `.` is danda in ITRANS input).
+  final bool preservePeriod;
 }

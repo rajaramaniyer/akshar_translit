@@ -71,7 +71,14 @@ class Transliterator {
     required Script to,
     TransliterationOptions options = const TransliterationOptions(),
   }) {
-    if (from == to) {
+    // Devanagari, Marathi and Hindi share the same glyph inventory, so any
+    // conversion within the family is byte-for-byte identity. The compound
+    // splitter is Sanskrit-specific and only fires when `from` is exactly
+    // [Script.devanagari].
+    final bool fromDevFamily = _isDevanagariFamily(from);
+    final bool toDevFamily = _isDevanagariFamily(to);
+
+    if (from == to || (fromDevFamily && toDevFamily)) {
       // Same-script identity is a no-op unless the compound-split
       // preprocessor is asked for and its Devanagari stem set is usable.
       if (options.splitCompounds && from == Script.devanagari) {
@@ -89,8 +96,10 @@ class Transliterator {
 
     String s = input;
 
-    // Optional compound-split preprocessor. Only meaningful for Devanagari
-    // sources (the bundled stem set is Devanagari); silently no-op otherwise.
+    // Optional compound-split preprocessor. Only meaningful for Sanskrit
+    // Devanagari sources (the bundled stem set is Devanagari and the split
+    // rules assume Sanskrit morphology); silently no-op for
+    // [Script.marathi] / [Script.hindi] and non-Devanagari scripts.
     if (options.splitCompounds && from == Script.devanagari) {
       s = _segmenterFor(options).insertBreaks(
         s,
@@ -118,7 +127,8 @@ class Transliterator {
     // clashes with other content, which is not the case for any of our
     // supported script pairs.
 
-    final List<_Pair> pairs = _buildPairs(src, tgt, romanTarget: romanTarget);
+    final List<_Pair> pairs = _buildPairs(src, tgt,
+        romanTarget: romanTarget, preservePeriod: options.preservePeriod);
     for (final _Pair p in pairs) {
       s = s.replaceAll(p.src, p.tgt);
     }
@@ -166,12 +176,17 @@ class Transliterator {
         s = s.replaceAll('\u0BB7\u00B2', '\u0BB6');
         return s;
       case Script.devanagari:
+      case Script.marathi:
+      case Script.hindi:
         // Aksharamukha strips U+0954 (schwa accent) here. No-op for us.
         return s;
       default:
         return s;
     }
   }
+
+  bool _isDevanagariFamily(Script s) =>
+      s == Script.devanagari || s == Script.marathi || s == Script.hindi;
 
   /// Reverse of `_shiftDiacritics`: `vs + diac` → `diac + vs`.
   String _shiftDiacriticsReverse(String s, ScriptMap src) {
@@ -192,6 +207,7 @@ class Transliterator {
     ScriptMap src,
     ScriptMap tgt, {
     required bool romanTarget,
+    bool preservePeriod = false,
   }) {
     final List<_Pair> pairs = <_Pair>[];
 
@@ -207,7 +223,22 @@ class Transliterator {
     // Aksharamukha order: Aytham, Signs, CombiningSigns, VowelSigns, Vowels,
     // Consonants, Numerals. Om is folded in as a single-element group.
     addGroup(src.aytham, tgt.aytham);
-    addGroup(src.signs, tgt.signs);
+    if (preservePeriod) {
+      // Skip any signs pair whose source is a plain ASCII period so that
+      // `.` (and `..`) in the input pass through as literal punctuation
+      // rather than getting substituted with the target's danda.
+      final List<String> srcSigns = <String>[];
+      final List<String> tgtSigns = <String>[];
+      for (int i = 0; i < src.signs.length; i++) {
+        final String s = src.signs[i];
+        if (s == '.' || s == '..') continue;
+        srcSigns.add(s);
+        tgtSigns.add(tgt.signs[i]);
+      }
+      addGroup(srcSigns, tgtSigns);
+    } else {
+      addGroup(src.signs, tgt.signs);
+    }
     addGroup(src.combiningSignsAll, tgt.combiningSignsAll);
     addGroup(src.vowelSignsAll, tgt.vowelSignsAll);
     if (romanTarget) {
@@ -335,6 +366,8 @@ class Transliterator {
         s = s.replaceAll('\u0D28\u200D\u094D', '\u0D7B');
         break;
       case Script.devanagari:
+      case Script.marathi:
+      case Script.hindi:
       case Script.tamil:
       case Script.itrans:
       case Script.romanReadable:
