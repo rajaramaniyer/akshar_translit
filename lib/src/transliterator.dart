@@ -71,7 +71,19 @@ class Transliterator {
     required Script to,
     TransliterationOptions options = const TransliterationOptions(),
   }) {
-    if (from == to) return input;
+    if (from == to) {
+      // Same-script identity is a no-op unless the compound-split
+      // preprocessor is asked for and its Devanagari stem set is usable.
+      if (options.splitCompounds && from == Script.devanagari) {
+        return DevanagariSegmenter.bundled().insertBreaks(
+          input,
+          allowVowelSandhi: options.splitAcrossVowelSandhi,
+          allowInflectedTail: options.splitAcrossInflection,
+          allowGreedyFallback: options.splitGreedyFallback,
+        );
+      }
+      return input;
+    }
     final ScriptMap src = ScriptMap.of(from);
     final ScriptMap tgt = ScriptMap.of(to);
 
@@ -124,6 +136,8 @@ class Transliterator {
     }
 
     // Preserved ZWSP word-break hints become real spaces in every target.
+    // (Same-script Devanagari→Devanagari with `splitCompounds` returns
+    // earlier without reaching this line, so ZWSPs survive there.)
     s = s.replaceAll(_zwsp, ' ');
 
     return s;
