@@ -86,6 +86,7 @@ const List<(String, int, String)> _terminalInflectSuffixes =
   ('ैः', 3, ''),      // pl inst
   ('ाः', 3, ''),      // nom / acc pl f
   ('ौ', 3, ''),       // dual nom / acc / voc
+  ('ेन', 3, ''),      // inst sg m/n a-stem  (देवेन, मुक्तेन)
   ('म्', 3, ''),      // acc sg m/n  ← the biggest single winner
   ('ीन्', 3, 'ि'),    // i-stem acc.pl.m. (आदि → आदीन्)
   ('िः', 3, 'ि'),     // nom sg m i-stem (हरि → हरिः, कवि → कविः)
@@ -801,6 +802,27 @@ class DevanagariSegmenter {
             break;
           }
         }
+      }
+    }
+
+    // Trailing-piece sanity check: if the final piece (from the last
+    // break to end) is neither a known stem nor a valid inflected
+    // terminal, drop breaks until it becomes valid — or we run out.
+    // Handles cases like `श्रीयमुनाम्` where greedy picks the longer
+    // prefix `श्रीय` (a real but obscure csl-inflect entry) and leaves
+    // `मुनाम्` as an unrecognisable residue. Dropping the break yields
+    // the surface-safe fallback (token unchanged) instead of a
+    // meaningless split.
+    if (allowInflectedTail) {
+      while (breaks.isNotEmpty) {
+        final int tailStart = breaks.last;
+        final String trailing =
+            token.substring(boundaries[tailStart], boundaries[n]);
+        final bool trailingValid = _stems.contains(trailing) ||
+            _isValidPiece(trailing,
+                isTerminal: true, allowInflectedTail: true);
+        if (trailingValid) break;
+        breaks.removeLast();
       }
     }
 

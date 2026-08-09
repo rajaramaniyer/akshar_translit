@@ -156,6 +156,38 @@ void main() {
       expect(seg.insertBreaks('पादपमुक्तेन', allowVowelSandhi: true),
           anyOf(equals('पादपमुक्तेन'), equals('पादप${_zwsp}मुक्तेन')));
     });
+
+    test('literal+greedy: does not leave unrecognisable tail after break',
+        () {
+      // `श्रीयमुनाम्`: greedy at pos 0 finds `श्रीय` (a real csl-inflect
+      // entry) as the longest prefix stem, but that leaves `मुनाम्` —
+      // neither a stem nor a valid inflected form — as the trailing
+      // piece. Rather than emit the meaningless split `श्रीय | मुनाम्`,
+      // the trailing-piece sanity check drops the break so the token
+      // stays intact. Splitting to `श्री | यमुनाम्` would also be
+      // acceptable, but requires 1-akshara head allowance which is out
+      // of scope here.
+      expect(
+        seg.insertBreaks(
+          'श्रीयमुनाम्',
+          allowVowelSandhi: false,
+          allowInflectedTail: true,
+          allowGreedyFallback: true,
+        ),
+        anyOf(equals('श्रीयमुनाम्'), equals('श्री${_zwsp}यमुनाम्')),
+      );
+      // Legit compound `पादप + मुक्तेन` must still split — `मुक्तेन` is
+      // valid inst-sg via the newly-added `-ेन` suffix.
+      expect(
+        seg.insertBreaks(
+          'पादपमुक्तेन',
+          allowVowelSandhi: false,
+          allowInflectedTail: true,
+          allowGreedyFallback: true,
+        ),
+        'पादप${_zwsp}मुक्तेन',
+      );
+    });
   });
 
   group('Transliterator.splitAcrossVowelSandhi option', () {
