@@ -13,6 +13,12 @@ class TransliterationOptions {
     this.tamilRemoveApostrophe,
     this.removeVedicSvaras = false,
     this.useNativeNumerals = false,
+    this.splitCompounds = false,
+    this.splitAcrossVowelSandhi = false,
+    this.splitAcrossInflection = false,
+    this.splitGreedyFallback = false,
+    this.extraStems = const <String>{},
+    this.preservePeriod = false,
   });
 
   /// Rewrite class nasal + virama + class consonant (ङ्क, ञ्च, ण्ट, न्त, म्प) as
@@ -59,4 +65,68 @@ class TransliterationOptions {
   /// (Devanagari `०–९`, Tamil `௦–௯`, etc.), matching Aksharamukha's
   /// upstream behaviour. Roman targets are unaffected either way.
   final bool useNativeNumerals;
+
+  /// When `true` and the source is Devanagari, run a dictionary-driven
+  /// compound splitter over each token before transliteration and insert
+  /// U+200B between recognised stems. The splitter is literal (no sandhi
+  /// undo): a compound is split only when its surface form equals the
+  /// concatenation of two or more stems from the bundled csl-inflect stem
+  /// set. Tokens that don't fully segment pass through unchanged. Ignored
+  /// when the source isn't Devanagari.
+  final bool splitCompounds;
+
+  /// When `true` *and* [splitCompounds] is `true`, extend the splitter to
+  /// also allow the six deterministic vowel-coalescence rules at seams
+  /// (`a/ā + a/ā/i/ī/u/ū/e/o` → single fused matra). Split pieces are
+  /// emitted in their *underlying* dictionary form, so the fused matra at
+  /// each split point is rewritten to two vowels — the output is no longer
+  /// a byte-for-byte transliteration of the input. Ignored when
+  /// [splitCompounds] is `false` or the source isn't Devanagari.
+  final bool splitAcrossVowelSandhi;
+
+  /// When `true` *and* [splitCompounds] is `true`, allow the *last* piece
+  /// of a compound to be `stem + case-ending` rather than a bare stem.
+  /// Only a small closed list of common nominal endings is recognised
+  /// (`म्`, `आम्`, `आन्`, `ौ`, `ाः`, `भ्याम्`, `ेभ्यः`, `ेषु`, `ैः`,
+  /// `ानाम्`). Essential for real Sanskrit text — devotional lines like
+  /// `राधाकृष्णपदाम्बुजभृङ्गम्` end with the accusative `-म्` which is
+  /// not a stem in itself. The last piece is emitted with its ending
+  /// intact. Ignored when [splitCompounds] is `false` or the source isn't
+  /// Devanagari.
+  final bool splitAcrossInflection;
+
+  /// When `true` *and* [splitCompounds] is `true`, long tokens that the
+  /// exact-cover splitter can't decompose are re-scanned left-to-right and
+  /// broken wherever a known stem starts. Unrecognised runs stay attached
+  /// to the following piece, so the output always covers the surface. Only
+  /// triggers for tokens of 16+ code units (roughly 5+ aksharas). Useful
+  /// for devotional / epic Sanskrit where the bundled csl-inflect stem set
+  /// has gaps: `प्राचेतसनारदप्रह्लादान्` becomes
+  /// `प्राचेतस​नारद​प्रह्लादान्` even though `प्रह्लाद` is missing.
+  /// Ignored when [splitCompounds] is `false` or the source isn't
+  /// Devanagari.
+  final bool splitGreedyFallback;
+
+  /// Additional Devanagari stems to teach the compound splitter on top of
+  /// the bundled csl-inflect stem set. Useful for proper names or domain
+  /// vocabulary the bundled lexicon doesn't cover (e.g. `प्रह्लाद`,
+  /// `नारद`, `हृदयोद्यान`). Only consulted when [splitCompounds] is `true`
+  /// and the source is Devanagari.
+  final Set<String> extraStems;
+
+  /// When `true`, the ASCII period `.` is never treated as a danda sign in
+  /// either direction. That is:
+  /// - For Roman sources (`itrans`, `romanReadable`) a literal `.` in the
+  ///   input passes through to the target unchanged instead of being
+  ///   substituted with the target's danda (`।` in Devanagari, `.` in
+  ///   Roman targets — which was the same character but happened via the
+  ///   danda mapping).
+  /// - For Indic targets a target's danda position is skipped from the
+  ///   substitution table when the source-side sign is exactly `.`.
+  ///
+  /// Doubled `..` (danda-danda) is likewise left alone. Use this when your
+  /// input mixes English punctuation with romanised Indic content and you
+  /// don't want stray `.`s to become `।`. Default `false` (preserves the
+  /// upstream Aksharamukha behaviour where `.` is danda in ITRANS input).
+  final bool preservePeriod;
 }

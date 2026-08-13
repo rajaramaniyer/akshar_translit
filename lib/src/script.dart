@@ -1,7 +1,21 @@
 /// The scripts supported by this package.
 enum Script {
-  /// Devanagari (used by Sanskrit, Hindi, Marathi, etc.).
+  /// Devanagari as used for Sanskrit. Alias-scripts [marathi] and [hindi]
+  /// share the same glyph inventory but disable Sanskrit-specific processing
+  /// (currently: the compound splitter).
   devanagari,
+
+  /// Devanagari as used for Marathi. Same character inventory as
+  /// [devanagari]; distinct only so that Sanskrit-specific pre-processing
+  /// (e.g. the compound splitter) is skipped. Marathi ↔ Devanagari ↔ Hindi
+  /// pairs are byte-for-byte identity.
+  marathi,
+
+  /// Devanagari as used for Hindi. Same character inventory as
+  /// [devanagari]; distinct only so that Sanskrit-specific pre-processing
+  /// (e.g. the compound splitter) is skipped. Hindi ↔ Devanagari ↔ Marathi
+  /// pairs are byte-for-byte identity.
+  hindi,
 
   /// Tamil, including Grantha letters that are part of the Tamil Unicode
   /// block (ஜ ஶ ஷ ஸ ஹ) and superscript-digit annotations (² ³ ⁴) that

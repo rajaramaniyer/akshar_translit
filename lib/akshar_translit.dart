@@ -19,6 +19,7 @@ import 'src/transliterator.dart';
 export 'src/options.dart' show TransliterationOptions;
 export 'src/script.dart' show Script;
 export 'src/transliterator.dart' show Transliterator;
+export 'src/segmenter/segmenter.dart' show DevanagariSegmenter;
 
 /// Convenience wrapper around [Transliterator.convert].
 String transliterate(

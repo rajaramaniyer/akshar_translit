@@ -1,0 +1,21 @@
+# Dart / Pub build artifacts (never commit)
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+
+# Coverage
+coverage/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Ad-hoc debug scripts under tool/ — kept locally, never committed.
+tool/probe_*.dart
+tool/trace_*.dart

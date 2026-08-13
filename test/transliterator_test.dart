@@ -291,4 +291,92 @@ void main() {
       expect(transliterate(s, from: Script.devanagari, to: Script.devanagari), s);
     });
   });
+
+  group('Marathi / Hindi source', () {
+    test('marathi → devanagari is byte-for-byte identity', () {
+      const String s = 'नमस्कार, तुम्ही कसे आहात?';
+      expect(transliterate(s, from: Script.marathi, to: Script.devanagari), s);
+    });
+
+    test('hindi → devanagari is byte-for-byte identity', () {
+      const String s = 'नमस्ते, आप कैसे हैं?';
+      expect(transliterate(s, from: Script.hindi, to: Script.devanagari), s);
+    });
+
+    test('marathi → tamil transliterates via Devanagari map', () {
+      // Marathi content uses the same Devanagari codepoints, so the output
+      // matches what Devanagari → Tamil would produce.
+      final String viaMarathi =
+          transliterate('राम', from: Script.marathi, to: Script.tamil);
+      final String viaDev =
+          transliterate('राम', from: Script.devanagari, to: Script.tamil);
+      expect(viaMarathi, viaDev);
+    });
+
+    test('hindi → itrans transliterates via Devanagari map', () {
+      final String viaHindi =
+          transliterate('नमस्ते', from: Script.hindi, to: Script.itrans);
+      final String viaDev =
+          transliterate('नमस्ते', from: Script.devanagari, to: Script.itrans);
+      expect(viaHindi, viaDev);
+    });
+
+    test('marathi source skips the compound splitter', () {
+      // Even with splitCompounds=true, a Sanskrit-looking compound is
+      // returned untouched when the source is declared as Marathi/Hindi.
+      const String compound = 'रामकृष्ण';
+      const TransliterationOptions opts =
+          TransliterationOptions(splitCompounds: true);
+      expect(
+        transliterate(compound,
+            from: Script.marathi, to: Script.marathi, options: opts),
+        compound,
+      );
+      expect(
+        transliterate(compound,
+            from: Script.hindi, to: Script.hindi, options: opts),
+        compound,
+      );
+    });
+  });
+
+  group('preservePeriod option', () {
+    test('default: `.` in ITRANS becomes danda in Devanagari', () {
+      // Baseline / current behaviour: ITRANS treats `.` as danda.
+      final String out =
+          transliterate('raam.', from: Script.itrans, to: Script.devanagari);
+      expect(out.contains('\u0964'), isTrue); // U+0964 = ।
+      expect(out.contains('.'), isFalse);
+    });
+
+    test('preservePeriod: `.` passes through unchanged', () {
+      const TransliterationOptions opts =
+          TransliterationOptions(preservePeriod: true);
+      final String out = transliterate('raam.',
+          from: Script.itrans, to: Script.devanagari, options: opts);
+      expect(out.endsWith('.'), isTrue);
+      expect(out.contains('\u0964'), isFalse);
+    });
+
+    test('preservePeriod: `..` also passes through', () {
+      const TransliterationOptions opts =
+          TransliterationOptions(preservePeriod: true);
+      final String out = transliterate('raam..',
+          from: Script.itrans, to: Script.devanagari, options: opts);
+      expect(out.endsWith('..'), isTrue);
+      expect(out.contains('\u0965'), isFalse); // U+0965 = ॥
+    });
+
+    test('preservePeriod does not affect Indic → Roman danda output', () {
+      // Devanagari danda still renders as `.` in ITRANS output — the option
+      // only skips signs whose *source* side is `.`, so the Dev-source
+      // signs list (which uses `।`, not `.`) is unaffected.
+      const TransliterationOptions opts =
+          TransliterationOptions(preservePeriod: true);
+      final String out = transliterate('राम।',
+          from: Script.devanagari, to: Script.itrans, options: opts);
+      expect(out.endsWith('.'), isTrue);
+      expect(out.contains('\u0964'), isFalse);
+    });
+  });
 }

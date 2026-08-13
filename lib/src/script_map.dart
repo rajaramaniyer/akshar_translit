@@ -97,6 +97,8 @@ class ScriptMap {
 
   static const Map<Script, ScriptMap> _registry = <Script, ScriptMap>{
     Script.devanagari: dev.map,
+    Script.marathi: dev.map,
+    Script.hindi: dev.map,
     Script.tamil: tam.map,
     Script.kannada: kan.map,
     Script.telugu: tel.map,

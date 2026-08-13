@@ -1,0 +1,36 @@
+# Supplementary Devanagari stems merged into the bundled segmenter set.
+#
+# Format:
+#   - one stem per line
+#   - blank lines ignored
+#   - `#` starts a line comment (also allowed at end of a stem line)
+#   - Devanagari letters / matras / virama / anusvara / visarga only —
+#     non-Devanagari lines are logged and skipped by the packer
+#
+# Purpose: teach the compound splitter proper names, epic characters, and
+# common samasa words that csl-inflect's lexnorm-all2.txt doesn't list.
+# Additions here become part of the bundled build; runtime callers can
+# still layer more per-call stems via `TransliterationOptions.extraStems`.
+#
+# Regenerate the packed dictionary with:
+#   dart run tool/build_stems.dart <path-to-lexnorm-all2.txt> tool/extra_stems.txt
+
+# --- Devotees / puranic figures (nāradādīnām et al.) ------------------
+प्रह्लाद
+प्रह्लादान्
+नारद
+उद्धव
+शौनक
+प्राचेतस
+
+# --- Devotional-poetry samasas the base lexicon under-covers ----------
+प्रेमिक
+भागवतार्थ
+हृदयोद्यान
+निर्हैतुक
+प्रकटन        # action noun: "manifesting, revealing"
+अमल           # "spotless / pure" — extremely common; base lexicon misses it
+बृन्द          # devotional-orthography variant of वृन्द (multitude)
+भजित          # past-passive participle "worshipped, adored"
+अलङ्कृत        # past-passive participle "adorned, decorated"
+चरणाङ्कित      # participle "footprint-marked" (common in विरहगीत / kīrtana)
